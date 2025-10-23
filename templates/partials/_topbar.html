@@ -1,0 +1,15 @@
+<header class="topbar">
+  <div class="brand"><a href="{% url 'home' %}">{{ BRAND.name }}</a></div>
+  <div class="spacer"></div>
+  <nav class="top-actions">
+    <a href="/admin/">Admin</a>
+    {% if request.user.is_authenticated %}
+      <span class="user">{{ request.user.username|default:request.user.email }}</span>
+      <a href="{% url 'logout' %}">Logout</a>
+    {% else %}
+      <a href="{% url 'login' %}">Login</a>
+      <a href="{% url 'signup' %}">Sign up</a>
+    {% endif %}
+  </nav>
+</header>
+

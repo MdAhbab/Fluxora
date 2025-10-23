@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Polls{% endblock %}
+{% block content %}
+<h1>Polls</h1>
+<ul>
+  {% for p in polls %}
+    <li>{{ p.question }} ({{ p.start_date|date:'Y-m-d' }})</li>
+  {% empty %}
+    <li class="muted">No polls</li>
+  {% endfor %}
+</ul>
+{% endblock %}
+

@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Tickets{% endblock %}
+{% block content %}
+<h1>Tickets</h1>
+<ul>
+  {% for t in tickets %}
+    <li><a href="{% url 'ticket_detail' t.id %}">#{{ t.id }} {{ t.category }} ({{ t.status }})</a></li>
+  {% empty %}
+    <li class="muted">No tickets found</li>
+  {% endfor %}
+</ul>
+{% endblock %}
+

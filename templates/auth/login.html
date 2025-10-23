@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Login · Fluxora{% endblock %}
+{% block content %}
+<section class="auth">
+  <div class="card auth-card">
+    <h1>Login</h1>
+    {% if messages %}
+      <div class="flash">
+        {% for message in messages %}
+          <div class="alert {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <form method="post" action="{% url 'login' %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.GET.next|default:'' }}" />
+      <div class="field">
+        <label for="email">Email or Username</label>
+        <input type="text" id="email" name="email" required autocomplete="username email" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password" />
+      </div>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+    <p class="muted">Don't have an account? <a href="{% url 'signup' %}">Sign up</a></p>
+  </div>
+</section>
+{% endblock %}
+

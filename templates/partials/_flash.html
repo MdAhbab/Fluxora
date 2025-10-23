@@ -1,0 +1,20 @@
+{% if messages %}
+  <div class="flash">
+    {% for message in messages %}
+      <div class="alert {{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+<header class="topbar">
+  <div class="brand">{{ BRAND.name }}</div>
+  <div class="spacer"></div>
+  <nav class="top-actions">
+    <a href="/admin/">Admin</a>
+    {% if request.user.is_authenticated %}
+      <span class="user">{{ request.user.username|default:request.user.email }}</span>
+    {% else %}
+      <a href="/accounts/login/">Login</a>
+    {% endif %}
+  </nav>
+</header>
+

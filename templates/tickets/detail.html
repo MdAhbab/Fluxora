@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block title %}Ticket #{{ ticket.id }}{% endblock %}
+{% block content %}
+<h1>Ticket #{{ ticket.id }}</h1>
+<p><strong>Category:</strong> {{ ticket.category }}</p>
+<p><strong>Status:</strong> {{ ticket.status }}</p>
+<p><strong>Priority:</strong> {{ ticket.priority }}</p>
+{% endblock %}
+

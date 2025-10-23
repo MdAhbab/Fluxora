@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Invoice · {{ invoice.invoice_number }}{% endblock %}
+{% block content %}
+<h1>Invoice {{ invoice.invoice_number }}</h1>
+<p><strong>Resident:</strong> {{ invoice.resident.user.name }}</p>
+<p><strong>Amount:</strong> {{ invoice.amount }}</p>
+<p><strong>Status:</strong> {{ invoice.status }}</p>
+<h3>Items</h3>
+<ul>
+  {% for item in invoice.items.all %}
+    <li>{{ item.description }} — {{ item.total_amount }}</li>
+  {% endfor %}
+</ul>
+{% endblock %}
+
