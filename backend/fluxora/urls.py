@@ -3,6 +3,7 @@
 from django.urls import path
 
 from .views import (
+    AuthLoginAPIView, AuthLogoutAPIView, AuthMeAPIView, AuthSignupAPIView, DashboardSummaryAPIView,
     UserViewSet, BuildingViewSet, UnitViewSet, ResidentViewSet,
     ServiceViewSet, VendorViewSet, ReviewViewSet,
     BillTypeViewSet, InvoiceViewSet, PaymentViewSet, ExpenseViewSet,
@@ -47,6 +48,7 @@ units_detail = make_detail(UnitViewSet)
 
 residents_list = make_list(ResidentViewSet)
 residents_detail = make_detail(ResidentViewSet)
+residents_directory = ResidentViewSet.as_view({'get': 'directory'})
 
 # Services & Vendors
 services_list = make_list(ServiceViewSet)
@@ -70,9 +72,11 @@ invoice_remind = InvoiceViewSet.as_view({'post': 'remind'})
 
 payments_list = make_list(PaymentViewSet)
 payments_detail = make_detail(PaymentViewSet)
+payments_checkout = PaymentViewSet.as_view({'post': 'checkout'})
 
 expenses_list = make_list(ExpenseViewSet)
 expenses_detail = make_detail(ExpenseViewSet)
+expenses_monthly_report = ExpenseViewSet.as_view({'get': 'monthly_report'})
 
 # Notices
 notices_list = make_list(NoticeViewSet)
@@ -96,11 +100,13 @@ visitors_list = make_list(VisitorViewSet)
 visitors_detail = make_detail(VisitorViewSet)
 visitor_checkin = VisitorViewSet.as_view({'patch': 'checkin'})
 visitor_checkout = VisitorViewSet.as_view({'patch': 'checkout'})
+visitor_scan = VisitorViewSet.as_view({'post': 'scan'})
 
 # Tickets
 tickets_list = make_list(TicketViewSet)
 tickets_detail = make_detail(TicketViewSet)
 ticket_images_upload = TicketViewSet.as_view({'post': 'images'})
+ticket_status = TicketViewSet.as_view({'patch': 'status'})
 
 ticketimages_list = make_list(TicketImageViewSet)
 ticketimages_detail = make_detail(TicketImageViewSet)
@@ -112,6 +118,7 @@ resource_availability = ResourceViewSet.as_view({'get': 'availability'})
 
 bookings_list = make_list(BookingViewSet)
 bookings_detail = make_detail(BookingViewSet)
+bookings_quote = BookingViewSet.as_view({'post': 'quote'})
 
 # Polls & Surveys
 polls_list = make_list(PollViewSet)
@@ -161,6 +168,7 @@ chat_members_detail = make_detail(RoomMemberViewSet)
 
 chat_messages_list = make_list(MessageViewSet)
 chat_messages_detail = make_detail(MessageViewSet)
+chat_messages_summary = MessageViewSet.as_view({'get': 'summary'})
 
 # Rental
 listings_list = make_list(ListingViewSet)
@@ -190,13 +198,16 @@ asset_maintenance_detail = make_detail(AssetMaintenanceViewSet)
 # Gate & Lift
 gate_events_list = make_list(GateEventViewSet)
 gate_events_detail = make_detail(GateEventViewSet)
+gate_events_analytics = GateEventViewSet.as_view({'get': 'analytics'})
 
 lift_status_list = make_list(LiftStatusLogViewSet)
 lift_status_detail = make_detail(LiftStatusLogViewSet)
+lift_status_current = LiftStatusLogViewSet.as_view({'get': 'current'})
 
 # Waste & Notifications
 waste_schedules_list = make_list(WasteScheduleViewSet)
 waste_schedules_detail = make_detail(WasteScheduleViewSet)
+waste_schedules_next = WasteScheduleViewSet.as_view({'get': 'next'})
 
 notifications_list = make_list(NotificationViewSet)
 notifications_detail = make_detail(NotificationViewSet)
@@ -218,6 +229,7 @@ emergency_contacts_detail = make_detail(EmergencyContactViewSet)
 # Parking
 parking_slots_list = make_list(ParkingSlotViewSet)
 parking_slots_detail = make_detail(ParkingSlotViewSet)
+parking_layout = ParkingSlotViewSet.as_view({'post': 'layout'})
 
 vehicles_list = make_list(VehicleViewSet)
 vehicles_detail = make_detail(VehicleViewSet)
@@ -235,6 +247,13 @@ ml_city_cache_detail = make_detail(MLCityPriceCacheViewSet)
 # ---------- API endpoints (path-based, no router) ----------
 # Append APIs
 urlpatterns += [
+    # Auth & dashboard summary
+    path('api/auth/login/', AuthLoginAPIView.as_view(), name='auth-login'),
+    path('api/auth/logout/', AuthLogoutAPIView.as_view(), name='auth-logout'),
+    path('api/auth/me/', AuthMeAPIView.as_view(), name='auth-me'),
+    path('api/auth/signup/', AuthSignupAPIView.as_view(), name='auth-signup'),
+    path('api/dashboard/summary/', DashboardSummaryAPIView.as_view(), name='dashboard-summary'),
+
     # Core
     path('api/users/', users_list, name='users-list'),
     path('api/users/<int:pk>/', users_detail, name='users-detail'),
@@ -247,6 +266,7 @@ urlpatterns += [
     # Residents
     path('api/residents/', make_list(ResidentViewSet), name='residents-list'),
     path('api/residents/<int:pk>/', make_detail(ResidentViewSet), name='residents-detail'),
+    path('api/directory/', ResidentViewSet.as_view({'get': 'directory'}), name='resident-directory'),
 
     # Services & Vendors
     path('api/services/', make_list(ServiceViewSet), name='services-list'),
@@ -266,8 +286,10 @@ urlpatterns += [
     path('api/invoices/<int:pk>/remind/', InvoiceViewSet.as_view({'post': 'remind'}), name='invoice-remind'),
     path('api/payments/', make_list(PaymentViewSet), name='payments-list'),
     path('api/payments/<int:pk>/', make_detail(PaymentViewSet), name='payments-detail'),
+    path('api/payments/checkout/', PaymentViewSet.as_view({'post': 'checkout'}), name='payments-checkout'),
     path('api/expenses/', make_list(ExpenseViewSet), name='expenses-list'),
     path('api/expenses/<int:pk>/', make_detail(ExpenseViewSet), name='expenses-detail'),
+    path('api/expenses/reports/monthly/', ExpenseViewSet.as_view({'get': 'monthly_report'}), name='expenses-monthly-report'),
 
     # Notices
     path('api/notices/', make_list(NoticeViewSet), name='notices-list'),
@@ -287,12 +309,14 @@ urlpatterns += [
     path('api/appointments/<int:pk>/qr/', AppointmentViewSet.as_view({'get': 'qr'}), name='appointment-qr'),
     path('api/visitors/', make_list(VisitorViewSet), name='visitors-list'),
     path('api/visitors/<int:pk>/', make_detail(VisitorViewSet), name='visitors-detail'),
+    path('api/visitors/scan/', VisitorViewSet.as_view({'post': 'scan'}), name='visitors-scan'),
     path('api/visitors/<int:pk>/checkin/', VisitorViewSet.as_view({'patch': 'checkin'}), name='visitors-checkin'),
     path('api/visitors/<int:pk>/checkout/', VisitorViewSet.as_view({'patch': 'checkout'}), name='visitors-checkout'),
 
     # Tickets
     path('api/tickets/', make_list(TicketViewSet), name='tickets-list'),
     path('api/tickets/<int:pk>/', make_detail(TicketViewSet), name='tickets-detail'),
+    path('api/tickets/<int:pk>/status/', TicketViewSet.as_view({'patch': 'status'}), name='ticket-status'),
     path('api/tickets/<int:pk>/images/', TicketViewSet.as_view({'post': 'images'}), name='ticket-images'),
     path('api/ticket-images/', make_list(TicketImageViewSet), name='ticketimages-list'),
     path('api/ticket-images/<int:pk>/', make_detail(TicketImageViewSet), name='ticketimages-detail'),
@@ -303,6 +327,7 @@ urlpatterns += [
     path('api/resources/<int:pk>/availability/', ResourceViewSet.as_view({'get': 'availability'}), name='resource-availability'),
     path('api/bookings/', make_list(BookingViewSet), name='bookings-list'),
     path('api/bookings/<int:pk>/', make_detail(BookingViewSet), name='bookings-detail'),
+    path('api/bookings/quote/', BookingViewSet.as_view({'post': 'quote'}), name='bookings-quote'),
 
     # Polls & Surveys
     path('api/polls/', make_list(PollViewSet), name='polls-list'),
@@ -344,6 +369,7 @@ urlpatterns += [
     path('api/chat/members/<int:pk>/', make_detail(RoomMemberViewSet), name='chat-members-detail'),
     path('api/chat/messages/', make_list(MessageViewSet), name='chat-messages-list'),
     path('api/chat/messages/<int:pk>/', make_detail(MessageViewSet), name='chat-messages-detail'),
+    path('api/chat/messages/summary/', MessageViewSet.as_view({'get': 'summary'}), name='chat-messages-summary'),
 
     # Rental
     path('api/listings/', make_list(ListingViewSet), name='listings-list'),
@@ -369,12 +395,15 @@ urlpatterns += [
     # Gate & Lift
     path('api/gate-events/', make_list(GateEventViewSet), name='gate-events-list'),
     path('api/gate-events/<int:pk>/', make_detail(GateEventViewSet), name='gate-events-detail'),
+    path('api/gate-events/analytics/', GateEventViewSet.as_view({'get': 'analytics'}), name='gate-events-analytics'),
     path('api/lifts/status/', make_list(LiftStatusLogViewSet), name='lift-status-list'),
     path('api/lifts/status/<int:pk>/', make_detail(LiftStatusLogViewSet), name='lift-status-detail'),
+    path('api/lifts/current/', LiftStatusLogViewSet.as_view({'get': 'current'}), name='lift-status-current'),
 
     # Waste & Notifications
     path('api/waste-schedules/', make_list(WasteScheduleViewSet), name='waste-schedules-list'),
     path('api/waste-schedules/<int:pk>/', make_detail(WasteScheduleViewSet), name='waste-schedules-detail'),
+    path('api/waste-schedules/next/', WasteScheduleViewSet.as_view({'get': 'next'}), name='waste-schedules-next'),
     path('api/notifications/', make_list(NotificationViewSet), name='notifications-list'),
     path('api/notifications/<int:pk>/', make_detail(NotificationViewSet), name='notifications-detail'),
 
@@ -393,6 +422,7 @@ urlpatterns += [
     # Parking
     path('api/parking/slots/', make_list(ParkingSlotViewSet), name='parking-slots-list'),
     path('api/parking/slots/<int:pk>/', make_detail(ParkingSlotViewSet), name='parking-slots-detail'),
+    path('api/parking/layout/', ParkingSlotViewSet.as_view({'post': 'layout'}), name='parking-layout'),
     path('api/vehicles/', make_list(VehicleViewSet), name='vehicles-list'),
     path('api/vehicles/<int:pk>/', make_detail(VehicleViewSet), name='vehicles-detail'),
 

@@ -11,9 +11,9 @@ const SiteFooter = () => {
         <div>
           <h4>Quick Links</h4>
           <ul>
-            <li><a href="#features">Features</a></li>
-            <li><a href="#modules">Suites</a></li>
-            <li><a href="#pricing">Pricing</a></li>
+            <li><a href="#features">Modules</a></li>
+            <li><a href="#modules">Workflows</a></li>
+            <li><a href="#pricing">Access</a></li>
           </ul>
         </div>
         <div>

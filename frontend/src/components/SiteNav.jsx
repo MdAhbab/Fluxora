@@ -8,14 +8,14 @@ const SiteNav = () => {
           Fluxora
         </Link>
         <div className="nav-links">
-          <a href="#features">Features</a>
-          <a href="#modules">Suites</a>
-          <a href="#pricing">Pricing</a>
+          <a href="#features">Modules</a>
+          <a href="#modules">Workflows</a>
+          <a href="#pricing">Access</a>
           <a href="#contact">Contact</a>
         </div>
         <div className="nav-actions">
           <Link to="/login" className="btn ghost">Login</Link>
-          <Link to="/signup" className="btn primary">Sign Up</Link>
+          <Link to="/signup" className="btn primary">Sign up</Link>
         </div>
       </nav>
     </header>

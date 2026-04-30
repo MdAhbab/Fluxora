@@ -1,0 +1,33 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="360" rx="28" fill="#102033"/>
+  <path d="M0 260 C220 180 360 340 560 250 C760 160 920 210 1200 120 V360 H0 Z" fill="#005FAA" opacity="0.72">
+    <animate attributeName="d" dur="8s" repeatCount="indefinite" values="M0 260 C220 180 360 340 560 250 C760 160 920 210 1200 120 V360 H0 Z;M0 230 C220 320 370 180 570 250 C760 320 930 120 1200 190 V360 H0 Z;M0 260 C220 180 360 340 560 250 C760 160 920 210 1200 120 V360 H0 Z"/>
+  </path>
+  <path d="M95 270 V132 H160 V270 H95Z" fill="#EAF4FB" opacity="0.94"/>
+  <path d="M185 270 V84 H270 V270 H185Z" fill="#FFFFFF" opacity="0.92"/>
+  <path d="M298 270 V112 H360 V270 H298Z" fill="#DDF7EF" opacity="0.94"/>
+  <g opacity="0.72">
+    <rect x="112" y="150" width="14" height="14" rx="2" fill="#005FAA"/>
+    <rect x="138" y="150" width="14" height="14" rx="2" fill="#005FAA"/>
+    <rect x="112" y="182" width="14" height="14" rx="2" fill="#005FAA"/>
+    <rect x="138" y="182" width="14" height="14" rx="2" fill="#005FAA"/>
+    <rect x="204" y="108" width="16" height="16" rx="2" fill="#005FAA"/>
+    <rect x="236" y="108" width="16" height="16" rx="2" fill="#005FAA"/>
+    <rect x="204" y="144" width="16" height="16" rx="2" fill="#005FAA"/>
+    <rect x="236" y="144" width="16" height="16" rx="2" fill="#005FAA"/>
+    <rect x="204" y="180" width="16" height="16" rx="2" fill="#005FAA"/>
+    <rect x="236" y="180" width="16" height="16" rx="2" fill="#005FAA"/>
+    <rect x="315" y="134" width="13" height="13" rx="2" fill="#005FAA"/>
+    <rect x="337" y="134" width="13" height="13" rx="2" fill="#005FAA"/>
+    <rect x="315" y="164" width="13" height="13" rx="2" fill="#005FAA"/>
+    <rect x="337" y="164" width="13" height="13" rx="2" fill="#005FAA"/>
+  </g>
+  <circle cx="1040" cy="94" r="56" fill="#FFB800" opacity="0.95">
+    <animate attributeName="r" values="48;58;48" dur="4s" repeatCount="indefinite"/>
+  </circle>
+  <text x="430" y="132" fill="white" font-family="Inter, Arial, sans-serif" font-size="64" font-weight="800">Fluxora</text>
+  <text x="433" y="180" fill="#A7F3D0" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="700">Building Management SaaS Platform</text>
+  <text x="433" y="226" fill="#DDEAF7" font-family="Inter, Arial, sans-serif" font-size="22">Finance • Security • Residents • Facilities • Chat • Analytics</text>
+  <rect x="433" y="252" width="178" height="42" rx="21" fill="#FFB800"/>
+  <text x="460" y="280" fill="#1F2937" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800">Created by Ahbab</text>
+</svg>

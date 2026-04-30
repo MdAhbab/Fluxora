@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+backend/staticfiles/
+backend/media/
+frontend/dist/
