@@ -1,8 +1,0 @@
-{% extends 'base.html' %}
-{% block title %}Document · {{ document.title }}{% endblock %}
-{% block content %}
-<h1>{{ document.title }}</h1>
-<p>MIME: {{ document.mime_type }} | Version: {{ document.version }}</p>
-<p>Uploaded at {{ document.uploaded_at }} by {{ document.uploaded_by.name }}</p>
-{% endblock %}
-
