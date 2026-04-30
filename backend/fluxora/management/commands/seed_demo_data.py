@@ -170,6 +170,22 @@ class Command(BaseCommand):
                     },
                 )
                 units.append(unit)
+                
+        # Also seed Banani Garden Square building
+        banani_building = Building.objects.get(name='Banani Garden Square')
+        for floor in range(1, 5):
+            for suffix in ['A', 'B', 'C']:
+                Unit.objects.update_or_create(
+                    building=banani_building,
+                    unit_number=f'{floor:02d}{suffix}',
+                    defaults={
+                        'floor': floor,
+                        'type': '3BHK',
+                        'size_sqft': 1800,
+                        'price': 22000000,
+                        'status': 'occupied' if floor <= 3 else 'available',
+                    },
+                )
 
         resident_1, _ = Resident.objects.update_or_create(
             user=resident_user_1,
@@ -288,7 +304,7 @@ class Command(BaseCommand):
             building=building,
             visitor_phone='+880181000200',
             scheduled_time=now + timedelta(hours=2),
-            defaults={'resident': resident_1, 'visitor_name': 'Tanvir Ahmed', 'approved': True, 'qr_token': 'GLH-VISITOR-1001'},
+            defaults={'resident': resident_1, 'visitor_name': 'Tanvir Ahmed', 'approved': True, 'qr_token': f'GLH-VIS-{int(now.timestamp())}'},
         )
         Visitor.objects.update_or_create(appointment=appointment, defaults={'status': 'pending', 'handled_by': guard_user})
 

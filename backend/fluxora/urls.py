@@ -27,6 +27,7 @@ from .views import (
     ParkingSlotViewSet, VehicleViewSet,
     MLModelViewSet, MLTrainingRunViewSet, MLCityPriceCacheViewSet, PriceEstimateAPIView,
     ActivityLogViewSet, BuildingSettingViewSet, AdminOverviewAPIView,
+    SettingsAPIView, SeedDemoDataAPIView,
 )
 
 # Helper: make list/detail views for a ViewSet
@@ -437,4 +438,8 @@ urlpatterns += [
     # Analytics/Overview and Price Estimate
     path('api/analytics/overview', AdminOverviewAPIView.as_view(), name='admin-overview'),
     path('api/ml/price-estimate', PriceEstimateAPIView.as_view(), name='price-estimate'),
+
+    # Settings and Seeding
+    path('api/settings/', SettingsAPIView.as_view(), name='settings'),
+    path('api/seed/', SeedDemoDataAPIView.as_view(), name='seed-data'),
 ]

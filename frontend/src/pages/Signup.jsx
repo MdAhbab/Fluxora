@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi, authStore } from '../lib/api'
+import '../landing-premium.css'
 
 const suites = [
   'Finance',
@@ -63,7 +64,7 @@ const Signup = () => {
   }
 
   return (
-    <div className="page auth-page modern-auth signup-auth">
+    <div className="page auth-page premium-auth signup-auth">
       <section className="auth-visual signup-visual">
         <Link to="/" className="logo auth-logo">Fluxora</Link>
         <div className="auth-visual-copy">

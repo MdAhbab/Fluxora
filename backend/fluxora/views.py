@@ -1686,3 +1686,92 @@ class AdminOverviewAPIView(APIView):
             'occupancy': Unit.objects.filter(status='occupied').count(),
         }
         return Response(data)
+
+class SeedDemoDataAPIView(APIView):
+    """Run the seed_demo_data management command via API (admin only)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not (user.is_staff or user.is_superuser):
+            return Response({'detail': 'Admin access required.'}, status=403)
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        try:
+            call_command('seed_demo_data', stdout=out)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=500)
+        return Response({'detail': out.getvalue().strip() or 'Demo data seeded successfully.'})
+
+
+class SettingsAPIView(APIView):
+    """Get/update user profile and building settings."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        business_user = business_user_from_request(request)
+        building_id = request.query_params.get('building_id')
+        building = Building.objects.filter(pk=building_id).first() if building_id else first_building_for_user(business_user)
+        return Response({
+            'user': serialize_business_user(business_user),
+            'building': BuildingSerializer(building).data if building else None,
+        })
+
+    def patch(self, request):
+        business_user = business_user_from_request(request)
+        section = request.data.get('section', 'user')
+        DjangoUser = get_user_model()
+
+        if section == 'user':
+            name = request.data.get('name')
+            phone = request.data.get('phone')
+            if business_user:
+                if name:
+                    business_user.name = name
+                if phone:
+                    business_user.phone = phone
+                business_user.save()
+                django_user = DjangoUser.objects.filter(email__iexact=business_user.email).first()
+                if django_user and name:
+                    django_user.first_name = name
+                    django_user.save(update_fields=['first_name'])
+            return Response({'detail': 'Profile updated.', 'user': serialize_business_user(business_user)})
+
+        elif section == 'password':
+            current = request.data.get('current_password')
+            new_password = request.data.get('new_password')
+            if not current or not new_password:
+                return Response({'detail': 'current_password and new_password required.'}, status=400)
+            django_user = DjangoUser.objects.filter(email__iexact=(business_user.email if business_user else '')).first()
+            if not django_user or not django_user.check_password(current):
+                return Response({'detail': 'Current password is incorrect.'}, status=400)
+            django_user.set_password(new_password)
+            django_user.save()
+            if business_user:
+                business_user.password_hash = make_password(new_password)
+                business_user.save(update_fields=['password_hash'])
+            # Regenerate token
+            Token.objects.filter(user=django_user).delete()
+            new_token, _ = Token.objects.get_or_create(user=django_user)
+            return Response({'detail': 'Password changed.', 'token': new_token.key})
+
+        elif section == 'building':
+            building_id = request.data.get('building_id')
+            building = Building.objects.filter(pk=building_id).first()
+            if not building:
+                return Response({'detail': 'Building not found.'}, status=404)
+            # Only admins can edit building info
+            user = request.user
+            if not (user.is_staff or user.is_superuser):
+                bu = business_user
+                if not bu or bu.role not in ('admin', 'committee'):
+                    return Response({'detail': 'Admin access required.'}, status=403)
+            for field in ['name', 'address', 'website', 'num_floors', 'total_units', 'year_built']:
+                val = request.data.get(field)
+                if val is not None:
+                    setattr(building, field, val)
+            building.save()
+            return Response({'detail': 'Building updated.', 'building': BuildingSerializer(building).data})
+
+        return Response({'detail': 'Unknown section.'}, status=400)

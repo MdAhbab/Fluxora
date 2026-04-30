@@ -1,0 +1,137 @@
+/* 3D Building CSS for Units Page */
+.building-3d-wrapper {
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: inset 0 2px 10px rgba(0,0,0,0.02);
+}
+
+.building-3d-container {
+  perspective: 1200px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 400px;
+  margin: 2rem 0;
+}
+
+.building-3d {
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(60deg) rotateZ(45deg);
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.building-3d:hover {
+  transform: rotateX(55deg) rotateZ(35deg);
+}
+
+.floor-3d {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 2px solid rgba(0, 95, 170, 0.6);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  left: -90px;
+  top: -90px;
+  box-shadow: inset 0 0 20px rgba(0, 95, 170, 0.1);
+}
+
+.floor-3d:hover {
+  background: rgba(0, 95, 170, 0.15);
+  border-color: rgba(0, 95, 170, 0.9);
+}
+
+.floor-info {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* Counteract parent rotation to face camera, then shift right in screen space */
+  transform: translate(-50%, -50%) rotateZ(-45deg) rotateX(-60deg) translateX(200px);
+  background: rgba(15, 23, 42, 0.95);
+  color: #fff;
+  padding: 1rem 1.2rem;
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  width: max-content;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+  z-index: 9999;
+  text-align: left;
+  transform-style: flat;
+}
+
+.floor-3d:hover .floor-info {
+  opacity: 1;
+  /* Shift slightly more to the right on hover for a nice pop-out animation */
+  transform: translate(-50%, -50%) rotateZ(-45deg) rotateX(-60deg) translateX(220px);
+}
+
+.floor-info h4 {
+  margin: 0 0 0.5rem 0;
+  color: #38bdf8;
+  font-size: 1.1rem;
+}
+
+.floor-info p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.floor-info .unit-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.floor-info .unit-badge {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.floor-info .unit-badge.occupied {
+  border-left: 3px solid #10b981;
+}
+
+.floor-info .unit-badge.vacant {
+  border-left: 3px solid #f59e0b;
+}
+
+/* Walls to make floors look 3D */
+.floor-3d::before, .floor-3d::after {
+  content: '';
+  position: absolute;
+  background: rgba(241, 245, 249, 0.9);
+  border: 1px solid rgba(0, 95, 170, 0.4);
+}
+
+/* Front wall */
+.floor-3d::before {
+  width: 100%;
+  height: 16px;
+  bottom: -16px;
+  left: -1px;
+  transform-origin: top;
+  transform: rotateX(-90deg);
+}
+
+/* Right wall */
+.floor-3d::after {
+  width: 16px;
+  height: 100%;
+  top: 0;
+  right: -16px;
+  transform-origin: left;
+  transform: rotateY(90deg);
+}

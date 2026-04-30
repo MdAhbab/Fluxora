@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi, authStore } from '../lib/api'
+import '../landing-premium.css'
 
 const Login = () => {
   const [role, setRole] = useState('Manager')
@@ -28,7 +29,7 @@ const Login = () => {
   }
 
   return (
-    <div className="page auth-page modern-auth">
+    <div className="page auth-page premium-auth">
       <section className="auth-visual">
         <Link to="/" className="logo auth-logo">Fluxora</Link>
         <div className="auth-visual-copy">

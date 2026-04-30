@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -138,4 +139,8 @@ def main():
 
 
 if __name__ == "__main__":
+    venv_python = ROOT / ".venv" / "bin" / "python3"
+    if venv_python.exists() and sys.prefix == sys.base_prefix:
+        print(f"Re-executing with virtual environment python: {venv_python}")
+        os.execl(venv_python, venv_python, *sys.argv)
     main()
