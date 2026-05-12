@@ -9,7 +9,6 @@ from django.db.models.functions import TruncMonth, ExtractHour
 from django.utils.timezone import now
 from django.conf import settings
 import math
-import re
 
 from rest_framework import serializers, viewsets, permissions, status
 from rest_framework.decorators import action
