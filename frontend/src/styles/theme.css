@@ -1,0 +1,192 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+
+  /* Stone & Brass — Daylight */
+  --bg: #F2EFE9;
+  --bg-raised: #FBF9F4;
+  --bg-sunken: #E7E2D8;
+  --ink: #191713;
+  --ink-muted: #6E675C;
+  --line: #D8D2C4;
+  --accent: #8C6A3F;
+  --accent-ink: #FBF9F4;
+  --positive: #4F6B4A;
+  --caution: #A6762B;
+  --critical: #8C3B2E;
+  --info: #3E5A6B;
+
+  /* shadcn bridge */
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--bg-raised);
+  --card-foreground: var(--ink);
+  --popover: var(--bg-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--bg-raised);
+  --secondary: var(--bg-sunken);
+  --secondary-foreground: var(--ink);
+  --muted: var(--bg-sunken);
+  --muted-foreground: var(--ink-muted);
+  --accent-foreground: var(--accent-ink);
+  --destructive: var(--critical);
+  --destructive-foreground: var(--bg-raised);
+  --border: var(--line);
+  --input: transparent;
+  --input-background: var(--bg-sunken);
+  --switch-background: var(--line);
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: var(--accent);
+  --radius: 2px;
+
+  --font-display: 'Fraunces', 'Times New Roman', serif;
+  --font-body: 'Archivo', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.dark, [data-theme='dark'] {
+  /* Stone & Brass — Nightwatch */
+  --bg: #0D0C0A;
+  --bg-raised: #161412;
+  --bg-sunken: #0A0908;
+  --ink: #EDE8DF;
+  --ink-muted: #9A938A;
+  --line: #2A2722;
+  --accent: #C9A36A;
+  --accent-ink: #0D0C0A;
+  --positive: #7E9B6E;
+  --caution: #D2A84B;
+  --critical: #C4654F;
+  --info: #7FA3B8;
+
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--bg-raised);
+  --card-foreground: var(--ink);
+  --popover: var(--bg-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--bg);
+  --secondary: var(--bg-raised);
+  --secondary-foreground: var(--ink);
+  --muted: var(--bg-raised);
+  --muted-foreground: var(--ink-muted);
+  --destructive: var(--critical);
+  --destructive-foreground: var(--bg);
+  --border: var(--line);
+  --input-background: #0A0908;
+  --switch-background: var(--line);
+  --ring: var(--accent);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-sunken: var(--bg-sunken);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-positive: var(--positive);
+  --color-caution: var(--caution);
+  --color-critical: var(--critical);
+  --color-info: var(--info);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+
+  --font-display: 'Fraunces', serif;
+  --font-sans: 'Archivo', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    border-color: var(--line);
+  }
+
+  html {
+    font-size: var(--font-size);
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+
+  .mono { font-family: var(--font-mono); font-feature-settings: 'tnum'; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-muted);
+  }
+
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+}
+
+/* Paper grain noise overlay */
+.grain::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  mix-blend-mode: multiply;
+}
+.dark .grain::before { mix-blend-mode: overlay; opacity: 0.06; }
+
+/* Hairline draw-on */
+@keyframes drawX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.draw-x { transform-origin: left; animation: drawX 1.2s cubic-bezier(.7,0,.2,1) forwards; }
+
+@keyframes windowLight {
+  0%, 100% { fill: var(--bg-sunken); }
+  50% { fill: var(--accent); }
+}
+
+/* Hide scrollbars on horizontal scrolls */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
