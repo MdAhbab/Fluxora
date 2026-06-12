@@ -3,6 +3,8 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
+const backendPort = process.env.BACKEND_PORT || 8000;
+
 export default defineConfig({
   plugins: [
     react(),
@@ -18,8 +20,8 @@ export default defineConfig({
   // Proxy API + media to the Django dev server so token auth and uploads work same-origin.
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
-      '/media': 'http://127.0.0.1:8000',
+      '/api': `http://127.0.0.1:${backendPort}`,
+      '/media': `http://127.0.0.1:${backendPort}`,
     },
   },
 

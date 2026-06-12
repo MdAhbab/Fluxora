@@ -59,7 +59,8 @@ def ensure_node_packages():
         print("Frontend node_modules present.")
         return
     print("Installing frontend packages...")
-    run(["npm", "install"], cwd=FRONTEND_DIR)
+    npm_path = shutil.which("npm") or "npm"
+    run([npm_path, "install"], cwd=FRONTEND_DIR)
 
 
 def seed_demo_data():
@@ -86,18 +87,31 @@ def terminate_process(proc, label):
 
 
 def start_services(run_backend=True, run_frontend=True):
+    import socket
+    def get_free_port(start_port):
+        for p in range(start_port, start_port + 100):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(('127.0.0.1', p)) != 0:
+                    return p
+        return start_port
+
     backend_proc = None
     frontend_proc = None
+    env = os.environ.copy()
 
     if run_backend:
-        backend_cmd = [sys.executable, "manage.py", "runserver", "127.0.0.1:8000"]
+        backend_port = get_free_port(8000)
+        backend_cmd = [sys.executable, "manage.py", "runserver", f"127.0.0.1:{backend_port}"]
         backend_proc = subprocess.Popen(backend_cmd, cwd=BACKEND_DIR)
-        print("Backend running at http://127.0.0.1:8000")
+        print(f"Backend running at http://127.0.0.1:{backend_port}")
+        env["BACKEND_PORT"] = str(backend_port)
 
     if run_frontend:
-        frontend_cmd = ["npm", "run", "dev"]
-        frontend_proc = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR)
-        print("Frontend running at http://127.0.0.1:5173")
+        frontend_port = get_free_port(5173)
+        npm_path = shutil.which("npm") or "npm"
+        frontend_cmd = [npm_path, "run", "dev", "--", "--port", str(frontend_port)]
+        frontend_proc = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR, env=env)
+        print(f"Frontend explicitly running at http://127.0.0.1:{frontend_port}")
 
     try:
         if backend_proc:

@@ -446,7 +446,19 @@ function ScrollIndicator({ progress, count }: { progress: MotionValue<number>; c
       {Array.from({ length: count }).map((_, i) => {
         const lo = i / count;
         const hi = (i + 1) / count;
-        const opacity = useTransform(progress, [lo - 0.02, lo, hi, hi + 0.02], [0.3, 1, 1, 0.3]);
+        
+        let inputs = [lo - 0.02, lo, hi, hi + 0.02];
+        let outputs = [0.3, 1, 1, 0.3];
+        
+        if (i === 0) {
+          inputs = [0, hi, hi + 0.02];
+          outputs = [1, 1, 0.3];
+        } else if (i === count - 1) {
+          inputs = [lo - 0.02, lo, 1];
+          outputs = [0.3, 1, 1];
+        }
+
+        const opacity = useTransform(progress, inputs, outputs);
         return (
           <motion.div key={i} className="flex items-center gap-2" style={{ opacity }}>
             <span className="mono text-[0.6rem] tracking-[0.2em] text-[var(--ink-muted)]">{String(i + 1).padStart(2, '0')}</span>
