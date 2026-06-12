@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Eyebrow, Panel, StatusDot, Btn, Chips, Field } from '../../components/shared/ui';
 import { useData } from '../../../lib/data';
-import { Upload, FileText } from 'lucide-react';
+import { useAuth } from '../../../lib/auth';
+import { runScribe, type NoticeDraft, type Tone, aiAudit, aiSettings } from '../../../lib/ai';
+import { Upload, FileText, AlertTriangle } from 'lucide-react';
+
+const DEFAULT_BRIEF = 'Water supply shut-off Tuesday 9am–1pm for tank cleaning';
 
 const TABS = ['Notices', 'Polls', 'Events', 'Documents', 'Directory', 'Chat rooms'];
 const TONES = ['Formal', 'Friendly', 'Urgent'];
@@ -44,12 +48,27 @@ const EVENTS = [
 ];
 
 export default function AdminCommunity() {
-  const { notices: NOTICES, polls: POLLS, addNotice, votePoll } = useData();
+  const data = useData();
+  const { notices: NOTICES, polls: POLLS, addNotice, votePoll } = data;
+  const { session } = useAuth();
   const [tab, setTab] = useState('Notices');
-  const [tone, setTone] = useState('Formal');
-  const [brief, setBrief] = useState('Lift B planned maintenance on 14 May, 6–10am');
-  const [drafted, setDrafted] = useState(true);
+  const [tone, setTone] = useState<Tone>('Formal');
+  const [brief, setBrief] = useState(DEFAULT_BRIEF);
+  const [draft, setDraft] = useState<NoticeDraft | null>(() => runScribe(DEFAULT_BRIEF, 'Formal'));
+  const [published, setPublished] = useState(false);
   const [room, setRoom] = useState('general');
+
+  const compose = () => {
+    setDraft(runScribe(brief, tone));
+    setPublished(false);
+    aiAudit.log({ agent: 'scribe', action: `Drafted notice (${tone}): "${brief.slice(0, 50)}"`, tools: ['get_building_facts', 'translate', 'lint_notice'], mode: aiSettings.get().mode, model: 'deterministic', buildingId: data.building?.id });
+  };
+  const publish = async () => {
+    if (!draft) return;
+    const ok = await addNotice({ title: draft.title, body: draft.bodyEn, is_pinned: draft.urgent });
+    setPublished(true);
+    aiAudit.log({ agent: 'scribe', action: `${ok ? 'Published' : 'Attempted'} notice: "${draft.title}"`, tools: ['propose_notice'], mode: aiSettings.get().mode, model: 'deterministic', approvedBy: session?.name, buildingId: data.building?.id });
+  };
 
   return (
     <div className="space-y-10">
@@ -67,31 +86,44 @@ export default function AdminCommunity() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <Panel title="Notice Scribe" num="01">
               <div className="p-6 space-y-5">
-                <Field label="Brief" value={brief} onChange={e => setBrief(e.target.value)} />
+                <Field label="Brief" value={brief} onChange={e => setBrief(e.target.value)} placeholder="water shut-off Tue 9–1 for tank cleaning" />
                 <div>
                   <div className="mono text-[0.66rem] tracking-[0.18em] uppercase text-[var(--ink-muted)] mb-2">Tone</div>
-                  <Chips items={TONES} active={tone} onChange={setTone} />
+                  <Chips items={TONES} active={tone} onChange={t => setTone(t as Tone)} />
                 </div>
-                <Btn variant="primary" onClick={() => setDrafted(true)}>Draft</Btn>
+                <Btn variant="primary" onClick={compose}>Draft</Btn>
+                {draft && (
+                  <div className="pt-2 space-y-3 border-t border-[var(--line)]">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="mono text-[0.6rem] uppercase tracking-[0.16em] border border-[var(--line)] px-2 py-1 text-[var(--accent)]">{draft.category}</span>
+                      {draft.urgent && <span className="mono text-[0.6rem] uppercase tracking-[0.16em] border border-[var(--critical)] text-[var(--critical)] px-2 py-1">Urgent · push + SMS</span>}
+                    </div>
+                    {draft.lint.map((w, i) => (
+                      <div key={i} className="flex items-start gap-2 mono text-[0.62rem] text-[var(--ink-muted)] leading-relaxed">
+                        <AlertTriangle size={11} strokeWidth={1.5} className="text-[var(--caution)] shrink-0 mt-0.5" /> {w}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </Panel>
 
-            <Panel title="Bilingual draft" num="02" action={drafted && <Btn variant="outline" onClick={async () => { await addNotice({ title: brief, body: NOTICES[0]?.bodyEn ?? brief }); }}>Publish</Btn>}>
-              {!drafted ? (
+            <Panel title="Bilingual draft" num="02" action={draft && (published ? <span className="mono text-[0.62rem] uppercase tracking-[0.16em] text-[var(--positive)]">Published</span> : <Btn variant="outline" onClick={publish}>Publish</Btn>)}>
+              {!draft ? (
                 <div className="p-12 text-center mono text-[0.72rem] uppercase tracking-[0.16em] text-[var(--ink-muted)]">
                   Draft will appear here
                 </div>
               ) : (
-                <div className="grid grid-cols-2 divide-x divide-[var(--line)]">
+                <div className="grid grid-cols-1 md:grid-cols-2 md:divide-x divide-[var(--line)]">
                   <div className="p-6 space-y-3">
                     <div className="mono text-[0.62rem] uppercase tracking-[0.2em] text-[var(--accent)]">English</div>
-                    <h3 className="display text-[1.1rem] leading-tight">{NOTICES[0].title}</h3>
-                    <p className="text-[0.9rem] leading-[1.6] text-[var(--ink-muted)]">{NOTICES[0].bodyEn}</p>
+                    <h3 className="display text-[1.1rem] leading-tight">{draft.title}</h3>
+                    <p className="text-[0.9rem] leading-[1.6] text-[var(--ink-muted)] whitespace-pre-line">{draft.bodyEn}</p>
                   </div>
-                  <div className="p-6 space-y-3">
+                  <div className="p-6 space-y-3 border-t md:border-t-0 border-[var(--line)]">
                     <div className="mono text-[0.62rem] uppercase tracking-[0.2em] text-[var(--accent)]">বাংলা</div>
-                    <h3 className="display text-[1.1rem] leading-tight">{NOTICES[0].title}</h3>
-                    <p className="text-[0.9rem] leading-[1.6] text-[var(--ink-muted)]">{NOTICES[0].bodyBn}</p>
+                    <h3 className="display text-[1.1rem] leading-tight">{draft.title}</h3>
+                    <p className="text-[0.9rem] leading-[1.6] text-[var(--ink-muted)] whitespace-pre-line">{draft.bodyBn}</p>
                   </div>
                 </div>
               )}

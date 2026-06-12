@@ -6,7 +6,15 @@ import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useData } from '../../lib/data';
 import { api } from '../../lib/api';
+import { useAiSettings, aiSettings, type AgentId } from '../../lib/ai';
 import { Btn, Eyebrow, Field, Panel, StatusDot } from '../components/shared/ui';
+
+const AGENTS: { id: AgentId; label: string }[] = [
+  { id: 'concierge', label: 'Flux Concierge' },
+  { id: 'triage', label: 'Triage Desk' },
+  { id: 'pulse', label: 'Building Pulse' },
+  { id: 'scribe', label: 'Notice Scribe' },
+];
 
 const sections = [
   { id: 'profile', label: 'Profile' },
@@ -46,12 +54,14 @@ export function Settings() {
       setSaving(false);
     }
   };
-  const [keys, setKeys] = useState([
-    { provider: 'Anthropic', last: 'sk-…2cd9', status: 'live' },
-    { provider: 'Google · Gemini', last: 'ai-…f10b', status: 'live' },
-    { provider: 'OpenAI', last: 'sk-…0a4c', status: 'idle' },
-  ]);
-  const [provider, setProvider] = useState<'managed' | 'self' | 'byok'>('managed');
+  const ai = useAiSettings();
+  const [newKey, setNewKey] = useState({ provider: '', model: '', key: '' });
+  const addKey = () => {
+    if (!newKey.provider || !newKey.key) return;
+    const tail = newKey.key.slice(-4);
+    aiSettings.addKey({ provider: newKey.provider, model: newKey.model || 'gpt-4o-mini', key: newKey.key, label: `…${tail}` });
+    setNewKey({ provider: '', model: '', key: '' });
+  };
 
   if (!session) return null;
   const showWorkspace = session.role === 'admin';
@@ -148,14 +158,14 @@ export function Settings() {
                   <h2 className="display text-[2rem] mb-4">AI & Intelligence</h2>
                   <Panel title="Provider" num="AI · 01" className="p-6 space-y-4">
                     {[
-                      { id: 'managed', l: 'Fluxora Managed AI', s: 'Included on Estate plans' },
-                      { id: 'self', l: 'Self-hosted Gemma', s: 'Point to your Ollama endpoint' },
+                      { id: 'self', l: 'Self-hosted Gemma', s: 'Point to your Ollama / vLLM endpoint' },
                       { id: 'byok', l: 'Bring-your-own keys', s: 'Ordered fallback list, multi-provider' },
+                      { id: 'managed', l: 'Fluxora Managed AI', s: 'Metered inference on our servers' },
                     ].map(o => (
-                      <button key={o.id} onClick={() => setProvider(o.id as any)}
-                        className={`w-full text-left flex items-start gap-4 p-4 border ${provider === o.id ? 'border-[var(--accent)] bg-[var(--bg-raised)]' : 'border-[var(--line)] hover:border-[var(--ink-muted)]'}`}>
-                        <span className={`w-4 h-4 rounded-full border ${provider === o.id ? 'border-[var(--accent)]' : 'border-[var(--line)]'} grid place-items-center mt-0.5`}>
-                          {provider === o.id && <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />}
+                      <button key={o.id} onClick={() => aiSettings.setMode(o.id as any)}
+                        className={`w-full text-left flex items-start gap-4 p-4 border ${ai.mode === o.id ? 'border-[var(--accent)] bg-[var(--bg-raised)]' : 'border-[var(--line)] hover:border-[var(--ink-muted)]'}`}>
+                        <span className={`w-4 h-4 rounded-full border ${ai.mode === o.id ? 'border-[var(--accent)]' : 'border-[var(--line)]'} grid place-items-center mt-0.5`}>
+                          {ai.mode === o.id && <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />}
                         </span>
                         <div>
                           <div>{o.l}</div>
@@ -165,37 +175,55 @@ export function Settings() {
                     ))}
                   </Panel>
 
-                  {provider === 'byok' && (
+                  {ai.mode === 'self' && (
+                    <Panel title="Endpoint" num="AI · 02" className="p-6 space-y-5">
+                      <Field label="Base URL" value={ai.selfHostUrl} onChange={e => aiSettings.setSelfHost(e.target.value)} placeholder="http://127.0.0.1:11434" />
+                      <Field label="Model" value={ai.selfHostModel} onChange={e => aiSettings.setSelfHost(ai.selfHostUrl, e.target.value)} placeholder="gemma3:4b" />
+                      <p className="mono text-[0.62rem] uppercase tracking-[0.16em] text-[var(--ink-muted)]">Agents fall back to deterministic mode when the endpoint is unreachable.</p>
+                    </Panel>
+                  )}
+
+                  {ai.mode === 'byok' && (
                     <Panel title="Keys · Ordered Fallback" num="AI · 02">
-                      {keys.map((k, i) => (
-                        <div key={i} className="grid grid-cols-[24px_1fr_120px_60px_60px] items-center gap-4 px-6 py-4 border-b border-[var(--line)] last:border-0">
+                      {ai.keys.length === 0 && (
+                        <div className="px-6 py-5 mono text-[0.66rem] uppercase tracking-[0.16em] text-[var(--ink-muted)]">No keys yet — add one below. Keys are tried in order; a rejected key cools down and the next is used.</div>
+                      )}
+                      {ai.keys.map((k, i) => (
+                        <div key={k.id} className="grid grid-cols-[24px_1fr_110px_90px_40px] items-center gap-4 px-6 py-4 border-b border-[var(--line)] last:border-0">
                           <span className="mono text-[0.62rem] text-[var(--ink-muted)]">{String(i + 1).padStart(2, '0')}</span>
-                          <span>{k.provider}</span>
-                          <span className="mono text-[0.74rem] text-[var(--ink-muted)]">{k.last}</span>
+                          <span className="truncate">{k.provider}<span className="mono text-[0.66rem] text-[var(--ink-muted)] ml-2">{k.model}</span></span>
+                          <span className="mono text-[0.74rem] text-[var(--ink-muted)]">{k.label}</span>
                           <span className="flex items-center gap-2 mono text-[0.62rem] uppercase tracking-[0.18em]">
-                            <StatusDot v={k.status === 'live' ? 'positive' : 'neutral'} /> {k.status}
+                            <StatusDot v={k.status === 'live' ? 'positive' : k.status === 'cooldown' ? 'pending' : 'neutral'} /> {k.status}
                           </span>
-                          <button className="text-[var(--ink-muted)] hover:text-[var(--critical)]" onClick={() => setKeys(ks => ks.filter((_, j) => j !== i))}>
+                          <button className="text-[var(--ink-muted)] hover:text-[var(--critical)]" onClick={() => aiSettings.removeKey(k.id)}>
                             <Trash2 size={14} strokeWidth={1.5} />
                           </button>
                         </div>
                       ))}
-                      <div className="px-6 py-4 border-t border-[var(--line)]">
-                        <Btn variant="outline"><Plus size={12} strokeWidth={1.5} /> Add provider key</Btn>
+                      <div className="px-6 py-5 border-t border-[var(--line)] grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                        <Field label="Provider" value={newKey.provider} onChange={e => setNewKey(k => ({ ...k, provider: e.target.value }))} placeholder="Groq" />
+                        <Field label="Model" value={newKey.model} onChange={e => setNewKey(k => ({ ...k, model: e.target.value }))} placeholder="llama-3.1-8b" />
+                        <Field label="API key" type="password" value={newKey.key} onChange={e => setNewKey(k => ({ ...k, key: e.target.value }))} placeholder="sk-…" />
+                        <div className="sm:col-span-3"><Btn variant="outline" onClick={addKey}><Plus size={12} strokeWidth={1.5} /> Add provider key</Btn></div>
                       </div>
                     </Panel>
                   )}
 
+                  {ai.mode === 'managed' && (
+                    <Panel title="Managed quota" num="AI · 02" className="p-6 space-y-3">
+                      <div className="mono text-[0.72rem] uppercase tracking-[0.16em] text-[var(--ink-muted)]">{ai.managedQuota.used} / {ai.managedQuota.limit} requests this month</div>
+                      <div className="h-2 bg-[var(--bg-sunken)]"><div className="h-full bg-[var(--accent)]" style={{ width: `${Math.min(100, (ai.managedQuota.used / ai.managedQuota.limit) * 100)}%` }} /></div>
+                    </Panel>
+                  )}
+
                   <Panel title="Per-agent toggles" num="AI · 03">
-                    {['Flux Concierge', 'Triage Desk', 'Building Pulse', 'Notice Scribe'].map((a, i) => (
-                      <div key={a} className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)] last:border-0">
-                        <div>
-                          <div>{a}</div>
-                          <div className="mono text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] mt-0.5">{12500 + i * 400} tokens this month</div>
-                        </div>
-                        <span className={`w-10 h-5 rounded-full relative ${i < 3 ? 'bg-[var(--accent)]' : 'bg-[var(--bg-sunken)]'}`}>
-                          <span className={`absolute top-0.5 ${i < 3 ? 'right-0.5' : 'left-0.5'} w-4 h-4 bg-[var(--bg-raised)] rounded-full`} />
-                        </span>
+                    {AGENTS.map(a => (
+                      <div key={a.id} className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)] last:border-0">
+                        <div>{a.label}</div>
+                        <button onClick={() => aiSettings.toggleAgent(a.id)} aria-label={`Toggle ${a.label}`} className={`w-10 h-5 rounded-full relative transition-colors ${ai.agents[a.id] ? 'bg-[var(--accent)]' : 'bg-[var(--bg-sunken)]'}`}>
+                          <span className={`absolute top-0.5 w-4 h-4 bg-[var(--bg-raised)] rounded-full transition-all ${ai.agents[a.id] ? 'right-0.5' : 'left-0.5'}`} />
+                        </button>
                       </div>
                     ))}
                   </Panel>

@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Eyebrow, Panel, StatusDot, StatusTag, Btn, Chips } from '../../components/shared/ui';
 import { formatBDT, type Ticket } from '../../../lib/mock';
 import { useData } from '../../../lib/data';
+import { useAuth } from '../../../lib/auth';
+import { runTriage, toAgentData, aiAudit, aiSettings } from '../../../lib/ai';
 import { GripVertical, Phone } from 'lucide-react';
 
 const TABS = ['Tickets', 'Staff', 'Assets', 'Vendors'];
@@ -151,12 +153,22 @@ export default function AdminOperations() {
 }
 
 function TicketsKanban() {
-  const { tickets: TICKETS, moveTicket } = useData();
+  const data = useData();
+  const { tickets: TICKETS, moveTicket } = data;
+  const { session } = useAuth();
+  const snap = useMemo(() => toAgentData(data), [data.tickets, data.staff]);
+  const [overridden, setOverridden] = useState<Set<string>>(new Set());
+  const [showReply, setShowReply] = useState<string | null>(null);
   const cols: { key: Ticket['status']; label: string; num: string }[] = [
     { key: 'open', label: 'Open', num: '01' },
     { key: 'in-progress', label: 'In progress', num: '02' },
     { key: 'resolved', label: 'Resolved', num: '03' },
   ];
+
+  const confirmTriage = (t: Ticket, tri: ReturnType<typeof runTriage>) => {
+    moveTicket(t);
+    aiAudit.log({ agent: 'triage', action: `Approved triage for ${t.id}: ${tri.category}/${tri.priority} → ${tri.assignee}`, tools: ['propose_triage', 'draft_reply'], mode: aiSettings.get().mode, model: 'deterministic', approvedBy: session?.name, buildingId: data.building?.id });
+  };
   return (
     <section className="grid grid-cols-1 lg:grid-cols-3 gap-px bg-[var(--line)] border border-[var(--line)]">
       {cols.map(col => {
@@ -196,20 +208,28 @@ function TicketsKanban() {
                     )}
                   </div>
 
-                  {t.status === 'open' && t.aiConfidence && (
-                    <div className="mt-4 border border-dashed border-[var(--accent)] p-3 space-y-2">
-                      <div className="mono text-[0.62rem] uppercase tracking-[0.2em] text-[var(--accent)]">
-                        Triage proposes · {t.aiConfidence}%
+                  {t.status === 'open' && !overridden.has(t.id) && (() => {
+                    const tri = runTriage(t, snap);
+                    return (
+                      <div className="mt-4 border border-dashed border-[var(--accent)] p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="mono text-[0.62rem] uppercase tracking-[0.2em] text-[var(--accent)]">Triage proposes</div>
+                          <span className="mono text-[0.62rem] text-[var(--ink-muted)]">{tri.confidence}%</span>
+                        </div>
+                        <div className="mono text-[0.78rem]">{tri.category} · {tri.priority} → {tri.assignee}</div>
+                        <div className="mono text-[0.62rem] text-[var(--ink-muted)] leading-relaxed">{tri.reason}</div>
+                        {tri.recurring && <div className="mono text-[0.6rem] uppercase tracking-[0.16em] text-[var(--caution)]">Recurring issue at {t.flat}</div>}
+                        <button onClick={() => setShowReply(showReply === t.id ? null : t.id)} className="mono text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-muted)] hover:text-[var(--accent)]">
+                          {showReply === t.id ? 'Hide' : 'Preview'} draft reply
+                        </button>
+                        {showReply === t.id && <p className="text-[0.76rem] leading-[1.5] text-[var(--ink-muted)] border-l-2 border-[var(--line)] pl-3">{tri.reply}</p>}
+                        <div className="flex gap-2 pt-1">
+                          <Btn variant="primary" className="h-8 px-3" onClick={() => confirmTriage(t, tri)}>Confirm</Btn>
+                          <Btn variant="ghost" className="h-8 px-3" onClick={() => setOverridden(s => new Set(s).add(t.id))}>Override</Btn>
+                        </div>
                       </div>
-                      <div className="mono text-[0.78rem]">
-                        {t.category} → {t.category === 'plumbing' ? 'Rahim' : t.category === 'electric' ? 'Mizan' : 'Karim'}
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <Btn variant="primary" className="h-8 px-3" onClick={() => moveTicket(t)}>Confirm</Btn>
-                        <Btn variant="ghost" className="h-8 px-3">Override</Btn>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </motion.li>
               ))}
             </ul>

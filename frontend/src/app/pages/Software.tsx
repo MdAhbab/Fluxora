@@ -5,8 +5,17 @@ import { Sun, Moon, LogOut, Server, Activity, Wallet, Cpu, FileSearch, ChevronRi
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useData } from '../../lib/data';
+import { useAiAudit, useAiSettings } from '../../lib/ai';
 import { TENANTS, formatBDT } from '../../lib/mock';
 import { Eyebrow, Panel, StatusDot, StatusTag, KPI, MiniBars, Btn, Chips, Drawer } from '../components/shared/ui';
+
+const relTime = (ts: number) => {
+  const s = Math.max(1, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+};
 
 const MODS = [
   { id: 'tenants', label: 'Tenants', num: '00', icon: Server },
@@ -186,15 +195,19 @@ function Health() {
 }
 
 function AIConsole() {
+  const ai = useAiSettings();
+  const modeLabel = { self: 'Self-hosted Gemma', byok: 'Bring-your-own keys', managed: 'Fluxora Managed AI' }[ai.mode];
+  const liveKeys = ai.keys.filter(k => k.status === 'live').length;
+  const enabledAgents = Object.values(ai.agents).filter(Boolean).length;
   return (
     <div className="space-y-8">
       <Eyebrow num="03" label="AI console" />
-      <h1 className="display text-[clamp(2rem,3.6vw,3rem)] leading-none">Managed AI tap</h1>
+      <h1 className="display text-[clamp(2rem,3.6vw,3rem)] leading-none">Gateway · {modeLabel}</h1>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KPI label="Tokens · 30d" value="184.2M" />
-        <KPI label="Spend · 30d" value="$ 2,140" />
-        <KPI label="Avg latency" value="1.4" unit="s" />
-        <KPI label="Fallback hits" value="0.4%" />
+        <KPI label="Active mode" value={ai.mode.toUpperCase()} hint={modeLabel} />
+        <KPI label="Agents enabled" value={`${enabledAgents} / 4`} />
+        <KPI label="BYOK keys live" value={ai.mode === 'byok' ? String(liveKeys) : '—'} hint={ai.mode === 'byok' ? `${ai.keys.length} total` : 'n/a'} />
+        <KPI label="Fallback" value="deterministic" hint="always available" />
       </div>
       <Panel num="04" title="Per-tenant usage">
         {TENANTS.slice(0, 4).map(t => (
@@ -210,22 +223,24 @@ function AIConsole() {
 }
 
 function Audit() {
+  const entries = useAiAudit();
+  const demo: { who: string; what: string; when: string }[] = [
+    { who: 'ops@fluxora.bd', what: 'Impersonated tenant Mirpur Mid-Rise', when: '1h' },
+    { who: 'system', what: 'No agent activity yet — actions appear here', when: '—' },
+  ];
+  const rows = entries.length
+    ? entries.map(e => ({ who: `${e.agent}${e.approvedBy ? ` · ${e.approvedBy}` : ''}`, what: e.action, when: relTime(e.ts) }))
+    : demo;
   return (
     <div className="space-y-8">
       <Eyebrow num="04" label="Audit log" />
-      <h1 className="display text-[clamp(2rem,3.6vw,3rem)] leading-none">Every change, signed</h1>
-      <Panel num="05" title="Recent events">
-        {[
-          ['admin@gulshanheights.bd', 'Updated invoice INV-2605-008', '2m'],
-          ['committee@banani.bd', 'Approved expense E-22 · Padma Diesel', '14m'],
-          ['ops@fluxora.bd', 'Impersonated tenant Mirpur Mid-Rise', '1h'],
-          ['system', 'AI fallback: Anthropic → Google · Gemini', '3h'],
-          ['admin@gulshanheights.bd', 'Toggled Architect Mode · saved 3 unit edits', '6h'],
-        ].map(([who, what, when], i) => (
+      <h1 className="display text-[clamp(2rem,3.6vw,3rem)] leading-none">Every agent action, signed</h1>
+      <Panel num="05" title="Recent events" action={<span className="mono text-[0.62rem] uppercase tracking-[0.16em] text-[var(--ink-muted)]">{entries.length} logged</span>}>
+        {rows.map((r, i) => (
           <div key={i} className="grid grid-cols-[1fr_2fr_60px] items-center px-6 py-3 border-b border-[var(--line)] last:border-0 mono text-[0.78rem]">
-            <span className="text-[var(--ink-muted)] truncate">{who}</span>
-            <span>{what}</span>
-            <span className="text-right text-[var(--ink-muted)]">{when}</span>
+            <span className="text-[var(--ink-muted)] truncate">{r.who}</span>
+            <span className="truncate">{r.what}</span>
+            <span className="text-right text-[var(--ink-muted)]">{r.when}</span>
           </div>
         ))}
       </Panel>

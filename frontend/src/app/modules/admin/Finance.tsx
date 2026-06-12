@@ -1,16 +1,24 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Eyebrow, Panel, KPI, StatusDot, Btn, Drawer, Chips, MiniBars, Field } from '../../components/shared/ui';
 import { formatBDT, type Invoice } from '../../../lib/mock';
 import { useData } from '../../../lib/data';
-import { Paperclip, Download } from 'lucide-react';
+import { runPulse, toAgentData, aiAudit, aiSettings } from '../../../lib/ai';
+import { Paperclip, Download, RefreshCw } from 'lucide-react';
 
 const TABS = ['Invoices', 'Expenses', 'Pulse'];
 const INV_FILTERS = ['All', 'Pending', 'Overdue', 'Paid'];
 
 export default function AdminFinance() {
-  const { invoices: INVOICES, expenses: EXPENSES, payInvoice, addExpense } = useData();
+  const data = useData();
+  const { invoices: INVOICES, expenses: EXPENSES, payInvoice, addExpense } = data;
   const [tab, setTab] = useState('Invoices');
+  const [pulseNonce, setPulseNonce] = useState(0);
+  const pulse = useMemo(() => runPulse(toAgentData(data)), [data.invoices, data.expenses, data.tickets, pulseNonce]);
+  const regenPulse = () => {
+    setPulseNonce(n => n + 1);
+    aiAudit.log({ agent: 'pulse', action: `Generated Pulse digest for ${pulse.month}`, tools: ['aggregate_finance', 'aggregate_expenses', 'aggregate_tickets', 'detect_anomalies'], mode: aiSettings.get().mode, model: 'deterministic', buildingId: data.building?.id });
+  };
   const [filter, setFilter] = useState('All');
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [method, setMethod] = useState('bKash');
@@ -142,51 +150,55 @@ export default function AdminFinance() {
 
       {tab === 'Pulse' && (
         <article className="max-w-3xl mx-auto bg-[var(--bg-raised)] border border-[var(--line)] p-10 md:p-16 relative">
-          <div className="mono text-[0.66rem] uppercase tracking-[0.22em] text-[var(--accent)]">Flux Pulse · Issue 05</div>
-          <h2 className="display text-[3.4rem] leading-[1.02] tracking-tight mt-4">
-            May 2026 · The <span className="italic text-[var(--accent)]">diesel</span> month.
-          </h2>
-          <p className="mono text-[0.7rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] mt-4">
-            By Flux Pulse · printed on demand
-          </p>
+          <div className="flex items-center justify-between">
+            <div className="mono text-[0.66rem] uppercase tracking-[0.22em] text-[var(--accent)]">Flux Pulse · {pulse.month}</div>
+            <button onClick={regenPulse} className="mono text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-muted)] hover:text-[var(--accent)] flex items-center gap-2">
+              <RefreshCw size={11} strokeWidth={1.5} /> Regenerate
+            </button>
+          </div>
+          <h2 className="display text-[3rem] md:text-[3.4rem] leading-[1.02] tracking-tight mt-4">{pulse.headline}.</h2>
+          <p className="text-[1.05rem] leading-[1.7] text-[var(--ink-muted)] mt-5">{pulse.standfirst}</p>
 
           <div className="h-px bg-[var(--line)] my-10" />
 
-          <p className="text-[1.05rem] leading-[1.7] text-[var(--ink)]">
-            Collection rate held above 87% for the fourth consecutive month, but the headline this period is generator
-            diesel — load-shedding ran 38% longer than April, pushing fuel to <span className="mono">৳ 84,000</span>, a
-            22% jump. The committee's 4% service-charge revision, effective June, was approved in time.
-          </p>
+          {pulse.sections.map((s, i) => (
+            <div key={s.title} className="mb-8">
+              <div className="mono text-[0.66rem] uppercase tracking-[0.2em] text-[var(--accent)] mb-2">{String(i + 1).padStart(2, '0')} · {s.title}</div>
+              <p className="text-[1.02rem] leading-[1.7]">{s.body}</p>
+            </div>
+          ))}
 
-          <blockquote className="my-10 border-y border-[var(--line)] py-8">
-            <p className="display italic text-[2rem] leading-[1.2] text-[var(--accent)]">
-              "Diesel is no longer a line item. It is the line item."
-            </p>
-          </blockquote>
-
-          <p className="text-[1.05rem] leading-[1.7]">
-            Lift B service is overdue and water-treatment contracts renew in July. We project surplus at month-end of
-            <span className="mono"> ৳ 412,000</span> — comfortable, but narrower than the trailing average.
-          </p>
+          {pulse.anomalies.length > 0 && (
+            <blockquote className="my-10 border-y border-[var(--line)] py-8">
+              <p className="display italic text-[1.8rem] leading-[1.2] text-[var(--accent)]">
+                "{pulse.anomalies[0].label} is {pulse.anomalies[0].pctOfMean > 0 ? 'up' : 'down'} {Math.abs(pulse.anomalies[0].pctOfMean)}% on the category mean — the line to watch."
+              </p>
+            </blockquote>
+          )}
 
           <div className="my-10">
-            <div className="mono text-[0.66rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] mb-4">
-              Spend by category · May
-            </div>
-            <MiniBars data={expenseByCat} />
+            <div className="mono text-[0.66rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] mb-4">Spend by category · {pulse.month}</div>
+            <MiniBars data={pulse.chart} />
+            <div className="mono text-[0.66rem] uppercase tracking-[0.16em] text-[var(--ink-muted)] mt-4">Total spend {formatBDT(pulse.expenseTotal)} · projected surplus {formatBDT(pulse.surplus)}</div>
           </div>
 
-          <blockquote className="my-10 border-y border-[var(--line)] py-8">
-            <p className="display italic text-[2rem] leading-[1.2] text-[var(--accent)]">
-              "Three flats remain overdue. Two have spoken with the office. One has not."
-            </p>
-          </blockquote>
+          <div className="my-10">
+            <div className="mono text-[0.66rem] uppercase tracking-[0.2em] text-[var(--accent)] mb-3">Recommended actions</div>
+            <ol className="space-y-3">
+              {pulse.actions.map((a, i) => (
+                <li key={i} className="flex gap-4 text-[1.02rem] leading-[1.6]">
+                  <span className="mono text-[0.8rem] text-[var(--accent)] tabular-nums">{String(i + 1).padStart(2, '0')}</span>
+                  <span>{a}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
 
           <div className="flex items-center justify-between pt-8 border-t border-[var(--line)]">
-            <span className="mono text-[0.66rem] uppercase tracking-[0.22em] text-[var(--ink-muted)]">
-              Continues on page 02 →
+            <span className="mono text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-muted)]">
+              Figures verified against ledger · {new Date(pulse.generatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
             </span>
-            <Btn variant="outline"><Download size={12} strokeWidth={1.5} /> Download PDF</Btn>
+            <Btn variant="outline" onClick={() => window.print()}><Download size={12} strokeWidth={1.5} /> Print / PDF</Btn>
           </div>
         </article>
       )}

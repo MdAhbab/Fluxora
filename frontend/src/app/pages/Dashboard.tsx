@@ -1,50 +1,52 @@
+import { lazy, Suspense, type FC } from 'react';
 import { Navigate, useParams } from 'react-router';
 import { useAuth } from '../../lib/auth';
 import { ROLE_MODULES } from '../../lib/roles';
 import { Shell } from '../components/shared/Shell';
 
-// admin
-import AdminOverview from '../modules/admin/Overview';
-import AdminFinance from '../modules/admin/Finance';
-import AdminOperations from '../modules/admin/Operations';
-import AdminSecurity from '../modules/admin/Security';
-import AdminCommunity from '../modules/admin/Community';
-import AdminEstate from '../modules/admin/Estate';
-
-// committee
-import CommitteeOverview from '../modules/committee/Overview';
-import CommitteeApprovals from '../modules/committee/Approvals';
-import CommitteeFinance from '../modules/committee/Finance';
-import CommitteeCommunity from '../modules/committee/Community';
-import CommitteeEstate from '../modules/committee/Estate';
-
-// resident
-import ResHome from '../modules/resident/Home';
-import ResBilling from '../modules/resident/Billing';
-import ResServices from '../modules/resident/Services';
-import ResVisitors from '../modules/resident/Visitors';
-import ResCommunity from '../modules/resident/Community';
-import ResMarketplace from '../modules/resident/Marketplace';
-
-// guard
-import GuardGatehouse from '../modules/guard/Gatehouse';
-import GuardExpected from '../modules/guard/Expected';
-import GuardLogs from '../modules/guard/Logs';
-import GuardIncidents from '../modules/guard/Incidents';
-
-// staff
-import StaffTasks from '../modules/staff/Tasks';
-import StaffAttendance from '../modules/staff/Attendance';
-import StaffPayroll from '../modules/staff/Payroll';
-import StaffNoticeboard from '../modules/staff/Noticeboard';
-
-const REGISTRY: Record<string, Record<string, React.FC>> = {
-  admin: { overview: AdminOverview, finance: AdminFinance, operations: AdminOperations, security: AdminSecurity, community: AdminCommunity, estate: AdminEstate },
-  committee: { overview: CommitteeOverview, approvals: CommitteeApprovals, finance: CommitteeFinance, community: CommitteeCommunity, estate: CommitteeEstate },
-  resident: { home: ResHome, billing: ResBilling, services: ResServices, visitors: ResVisitors, community: ResCommunity, marketplace: ResMarketplace },
-  guard: { gatehouse: GuardGatehouse, expected: GuardExpected, logs: GuardLogs, incidents: GuardIncidents },
-  staff: { tasks: StaffTasks, attendance: StaffAttendance, payroll: StaffPayroll, noticeboard: StaffNoticeboard },
+// Per-role, per-module code splitting: a resident never downloads the admin
+// Finance/Operations bundles, and vice-versa. Each module is its own lazy chunk.
+const REGISTRY: Record<string, Record<string, FC>> = {
+  admin: {
+    overview: lazy(() => import('../modules/admin/Overview')),
+    finance: lazy(() => import('../modules/admin/Finance')),
+    operations: lazy(() => import('../modules/admin/Operations')),
+    security: lazy(() => import('../modules/admin/Security')),
+    community: lazy(() => import('../modules/admin/Community')),
+    estate: lazy(() => import('../modules/admin/Estate')),
+  },
+  committee: {
+    overview: lazy(() => import('../modules/committee/Overview')),
+    approvals: lazy(() => import('../modules/committee/Approvals')),
+    finance: lazy(() => import('../modules/committee/Finance')),
+    community: lazy(() => import('../modules/committee/Community')),
+    estate: lazy(() => import('../modules/committee/Estate')),
+  },
+  resident: {
+    home: lazy(() => import('../modules/resident/Home')),
+    billing: lazy(() => import('../modules/resident/Billing')),
+    services: lazy(() => import('../modules/resident/Services')),
+    visitors: lazy(() => import('../modules/resident/Visitors')),
+    community: lazy(() => import('../modules/resident/Community')),
+    marketplace: lazy(() => import('../modules/resident/Marketplace')),
+  },
+  guard: {
+    gatehouse: lazy(() => import('../modules/guard/Gatehouse')),
+    expected: lazy(() => import('../modules/guard/Expected')),
+    logs: lazy(() => import('../modules/guard/Logs')),
+    incidents: lazy(() => import('../modules/guard/Incidents')),
+  },
+  staff: {
+    tasks: lazy(() => import('../modules/staff/Tasks')),
+    attendance: lazy(() => import('../modules/staff/Attendance')),
+    payroll: lazy(() => import('../modules/staff/Payroll')),
+    noticeboard: lazy(() => import('../modules/staff/Noticeboard')),
+  },
 };
+
+function ModuleFallback() {
+  return <div className="py-24 grid place-items-center mono text-[0.7rem] uppercase tracking-[0.22em] text-[var(--ink-muted)] animate-pulse">Loading…</div>;
+}
 
 export function Dashboard() {
   const { session } = useAuth();
@@ -53,5 +55,11 @@ export function Dashboard() {
   const cfg = ROLE_MODULES[session.role];
   const Mod = REGISTRY[session.role]?.[activeModule || ''];
   if (!Mod) return <Navigate to={`/dashboard/${cfg.defaultModule}`} replace />;
-  return <Shell><Mod /></Shell>;
+  return (
+    <Shell>
+      <Suspense fallback={<ModuleFallback />}>
+        <Mod />
+      </Suspense>
+    </Shell>
+  );
 }

@@ -1,12 +1,13 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { Moon, Sun, ChevronDown, LogOut, Settings, Bell, MessageCircle, Sparkles, Send } from 'lucide-react';
+import { Moon, Sun, ChevronDown, LogOut, Settings, Bell, Sparkles, Send, Check } from 'lucide-react';
 import { useAuth } from '../../../lib/auth';
 import { useTheme } from '../../../lib/theme';
 import { ROLE_MODULES, ROLE_LABEL } from '../../../lib/roles';
 import { useData } from '../../../lib/data';
 import { fmtRelative } from '../../../lib/adapt';
+import { runConcierge, enhanceReply, toAgentData, aiSettings, aiAudit, useAiSettings, type Proposal } from '../../../lib/ai';
 
 export function Shell({ children }: { children: ReactNode }) {
   const { session, logout, switchBuilding } = useAuth();
@@ -199,14 +200,66 @@ export function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+type ChatTurn = { id: number; from: 'user' | 'bot'; text: string; sources?: string[]; proposal?: Proposal; done?: boolean };
+
+const CHIPS: Record<string, string[]> = {
+  admin: ['What are collections at?', 'Who is on duty?', 'Any overdue invoices?'],
+  committee: ['What are collections at?', 'Any overdue invoices?'],
+  resident: ['What is my balance?', 'Register a visitor tomorrow 10am', 'Book the rooftop Friday 7pm'],
+  guard: ['Next waste collection?', 'Show the lift notice'],
+  staff: ['Show the latest notice', 'Next waste collection?'],
+};
+
 function Concierge({ onClose, role }: { onClose: () => void; role: string }) {
-  const chips: Record<string, string[]> = {
-    admin: ['Show overdue invoices', 'Who is on duty?', 'Open the Pulse report'],
-    committee: ['Approve pending expenses', 'Open notice draft'],
-    resident: ['Pay my bill', 'Register a visitor', 'Book the rooftop'],
-    guard: ['Who is expected at 5pm?', 'Last 10 gate events'],
-    staff: ['Clock me in', 'My tasks today'],
+  const data = useData();
+  const { session } = useAuth();
+  const settings = useAiSettings();
+  const enabled = settings.agents.concierge;
+  const [turns, setTurns] = useState<ChatTurn[]>([{ id: 0, from: 'bot', text: 'I can check your balance, draft a payment, register a visitor, book a facility, file a ticket, or look up a notice. What do you need?', done: true }]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const seq = useRef(1);
+  const scroller = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' }); }, [turns]);
+
+  const ask = (text: string) => {
+    const q = text.trim();
+    if (!q || busy) return;
+    setInput('');
+    setBusy(true);
+    const userTurn: ChatTurn = { id: seq.current++, from: 'user', text: q };
+    setTurns(t => [...t, userTurn]);
+
+    const snap = toAgentData(data);
+    const reply = runConcierge(q, role as any, snap);
+    const botId = seq.current++;
+    // Deterministic answer shows instantly and the input frees up immediately —
+    // the optional model enrichment runs detached so a slow endpoint never blocks.
+    setTurns(t => [...t, { id: botId, from: 'bot', text: reply.text, sources: reply.sources, proposal: reply.proposal, done: true }]);
+    setBusy(false);
+    aiAudit.log({ agent: 'concierge', action: `Answered: "${q.slice(0, 60)}"`, tools: reply.sources || [], mode: aiSettings.get().mode, model: enabled ? 'auto' : 'deterministic', buildingId: data.building?.id });
+
+    enhanceReply(reply, q, enabled)
+      .then(text => { if (text && text !== reply.text) setTurns(t => t.map(x => x.id === botId ? { ...x, text } : x)); })
+      .catch(() => { /* keep deterministic text */ });
   };
+
+  const confirm = async (turn: ChatTurn) => {
+    const p = turn.proposal;
+    if (!p) return;
+    let ok = false;
+    if (p.kind === 'payment') ok = await data.payInvoice(p.payload.invoice, p.payload.method);
+    else if (p.kind === 'visitor') ok = await data.createAppointment(p.payload as any);
+    else if (p.kind === 'ticket') ok = await data.createTicket(p.payload as any);
+    else if (p.kind === 'booking') {
+      const match = (data.resources || []).find((r: any) => String(r.name || '').toLowerCase().includes(String(p.payload.facility).toLowerCase()));
+      ok = await data.addBooking({ resource: match?.id ?? 0, start_time: p.payload.start_time, end_time: p.payload.end_time, purpose: p.payload.purpose });
+    }
+    aiAudit.log({ agent: 'concierge', action: `${ok ? 'Confirmed' : 'Failed'} ${p.kind}: ${p.summary}`, tools: [p.kind], mode: aiSettings.get().mode, model: 'deterministic', approvedBy: session?.name, buildingId: data.building?.id });
+    setTurns(t => t.map(x => x.id === turn.id ? { ...x, proposal: undefined, text: ok ? `Done — ${p.summary.toLowerCase()}.` : `I couldn't complete that just now. You can do it manually from the module.` } : x));
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.96 }}
@@ -217,25 +270,47 @@ function Concierge({ onClose, role }: { onClose: () => void; role: string }) {
         <div className="flex items-center gap-3">
           <Sparkles size={16} strokeWidth={1.5} className="text-[var(--accent)]" />
           <span className="mono uppercase tracking-[0.2em] text-[0.72rem]">Flux Concierge</span>
+          <span className="mono text-[0.56rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] border border-[var(--line)] px-1.5 py-0.5">{enabled ? settings.mode : 'manual'}</span>
         </div>
         <button onClick={onClose} className="mono text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] hover:text-[var(--accent)]">Close</button>
       </header>
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
-        <div className="bg-[var(--bg-sunken)] p-4 mono text-[0.78rem] leading-relaxed">
-          Good evening. I can pay a bill, register a guest, file a ticket, or just answer a question about the building. What can I do?
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {(chips[role] || []).map(c => (
-            <button key={c} className="mono text-[0.66rem] uppercase tracking-[0.16em] border border-[var(--line)] hover:border-[var(--accent)] hover:text-[var(--accent)] h-8 px-3 transition">
-              {c}
-            </button>
-          ))}
-        </div>
+
+      <div ref={scroller} className="flex-1 overflow-y-auto p-5 space-y-4">
+        {turns.map(turn => (
+          <div key={turn.id} className={turn.from === 'user' ? 'flex justify-end' : ''}>
+            <div className={`${turn.from === 'user' ? 'bg-[var(--accent)] text-[var(--accent-ink)] max-w-[85%]' : 'bg-[var(--bg-sunken)]'} p-3 text-[0.84rem] leading-relaxed`}>
+              {turn.text}
+              {turn.from === 'bot' && turn.sources && turn.sources.length > 0 && (
+                <div className="mono text-[0.54rem] uppercase tracking-[0.16em] text-[var(--ink-muted)] mt-2">via {turn.sources.join(' · ')}</div>
+              )}
+              {turn.proposal && (
+                <div className="mt-3 border border-dashed border-[var(--accent)] p-3 space-y-2">
+                  <div className="mono text-[0.6rem] uppercase tracking-[0.18em] text-[var(--accent)]">Proposal · needs your confirmation</div>
+                  <div className="text-[0.82rem]">{turn.proposal.summary}</div>
+                  <button onClick={() => confirm(turn)} className="inline-flex items-center gap-2 h-8 px-3 bg-[var(--ink)] text-[var(--bg-raised)] mono text-[0.62rem] uppercase tracking-[0.16em]">
+                    <Check size={12} strokeWidth={2} /> {turn.proposal.confirmLabel || 'Confirm'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {busy && <div className="mono text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-muted)]">thinking…</div>}
+        {turns.length <= 1 && (
+          <div className="flex flex-wrap gap-2 pt-2">
+            {(CHIPS[role] || []).map(c => (
+              <button key={c} onClick={() => ask(c)} className="mono text-[0.62rem] uppercase tracking-[0.14em] border border-[var(--line)] hover:border-[var(--accent)] hover:text-[var(--accent)] h-8 px-3 transition text-left">
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="border-t border-[var(--line)] p-3 flex items-center gap-2">
-        <input className="flex-1 h-10 px-3 bg-transparent text-[0.92rem] outline-none" placeholder="Ask the concierge…" />
-        <button className="w-10 h-10 grid place-items-center bg-[var(--accent)] text-[var(--accent-ink)]"><Send size={14} strokeWidth={1.5} /></button>
-      </div>
+
+      <form onSubmit={e => { e.preventDefault(); ask(input); }} className="border-t border-[var(--line)] p-3 flex items-center gap-2">
+        <input value={input} onChange={e => setInput(e.target.value)} className="flex-1 h-10 px-3 bg-transparent text-[0.92rem] outline-none" placeholder="Ask the concierge…" />
+        <button type="submit" disabled={busy} className="w-10 h-10 grid place-items-center bg-[var(--accent)] text-[var(--accent-ink)] disabled:opacity-40"><Send size={14} strokeWidth={1.5} /></button>
+      </form>
     </motion.div>
   );
 }

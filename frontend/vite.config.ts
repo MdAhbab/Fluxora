@@ -25,4 +25,18 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the rarely-changing framework code into a long-cached vendor
+        // chunk, separate from the animation runtime, so app edits don't bust them.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/.test(id)) return 'react-vendor';
+          if (id.includes('motion') || id.includes('framer')) return 'motion';
+        },
+      },
+    },
+  },
 })
