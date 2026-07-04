@@ -109,7 +109,7 @@ else:
             'ENGINE': _DB_ENGINE,
             'NAME': os.getenv('MYSQL_DATABASE', 'fluxora'),
             'USER': os.getenv('MYSQL_USER', 'root'),
-            'PASSWORD': os.getenv('MYSQL_PASSWORD', 'root'),
+            'PASSWORD': os.getenv('MYSQL_PASSWORD', '12345678'),
             'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
             'PORT': os.getenv('MYSQL_PORT', '3306'),
             'OPTIONS': {

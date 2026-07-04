@@ -185,7 +185,7 @@ export function Landing() {
 
       <section ref={sectionRef} id="platform" style={{ position: 'relative', height: `${scenes.length * 100}vh` }}>
         <div className="sticky top-0 h-screen overflow-hidden">
-          <div className="absolute inset-0">
+          <div className="absolute inset-0 !top-16">
             <TowerCamera progress={scrollYProgress} scenes={cameraScenes} highlight={highlight} />
           </div>
 
