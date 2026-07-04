@@ -2,14 +2,15 @@ from uuid import uuid4
 
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.core.files.storage import default_storage
-from django.db.models import Count, Sum, Q, Max
+from django.db.models import Count, Prefetch, Sum, Q, Max
 from django.db.models.functions import TruncMonth, ExtractHour
 from django.utils.timezone import now
-from django.conf import settings
 import math
-import re
 
 from rest_framework import serializers, viewsets, permissions, status
 from rest_framework.decorators import action
@@ -21,6 +22,8 @@ from rest_framework.authtoken.models import Token
 from .models import (
     # Core
     UserRole, User, Building, Unit, Resident,
+    # Shared choices
+    TicketStatus,
     # Services & Vendors
     Service, Vendor, Review,
     # Finance
@@ -66,7 +69,8 @@ from .models import (
     # Activity & Settings
     ActivityLog, BuildingSetting,
 )
-from .permissions import IsCommitteeOrAdmin
+from .permissions import IsCommitteeOrAdmin, IsCommitteeOrAdminStrict
+from .tenancy import BuildingScopedMixin, allowed_building_ids, buildings_for_user, is_backoffice
 
 
 def business_user_from_request(request):
@@ -110,10 +114,6 @@ def first_building_for_user(user):
     )
 
 
-def pageless_data(serializer_class, queryset, many=True):
-    return serializer_class(queryset, many=many).data
-
-
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField()
@@ -139,6 +139,9 @@ class AutoModelSerializer(serializers.ModelSerializer):
 class UserSerializer(AutoModelSerializer):
     class Meta(AutoModelSerializer.Meta):
         model = User
+        # Never expose credentials or government identifiers through the API.
+        fields = None
+        exclude = ('password_hash', 'national_id', 'dob')
 
 
 class BuildingSerializer(AutoModelSerializer):
@@ -491,27 +494,6 @@ class BuildingSettingSerializer(AutoModelSerializer):
         model = BuildingSetting
 
 
-# ========= Permissions (simple defaults) =========
-
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        # Allow Django staff/superusers
-        user = getattr(request, 'user', None)
-        if user and user.is_authenticated and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)):
-            return True
-        # Fallback: map Django user -> business user by email and check role
-        try:
-            if user and user.is_authenticated and getattr(user, 'email', None):
-                bu = User.objects.filter(email=user.email).first()
-                if bu and bu.role in ('admin', 'committee'):
-                    return True
-        except Exception:
-            pass
-        return False
-
-
 # ========= ViewSets & APIs =========
 
 class AuthLoginAPIView(APIView):
@@ -573,30 +555,36 @@ class AuthSignupAPIView(APIView):
         modules = serializer.validated_data.get('modules', [])
 
         DjangoUser = get_user_model()
-        if DjangoUser.objects.filter(email__iexact=email).exists():
+        if DjangoUser.objects.filter(email__iexact=email).exists() or User.objects.filter(email__iexact=email).exists():
             return Response({'detail': 'An account with this email already exists.'}, status=400)
 
-        django_user = DjangoUser.objects.create_user(username=email, email=email, password=password, first_name=name)
-        business_user = User.objects.create(
-            name=name,
-            email=email,
-            password_hash=make_password(password),
-            role=UserRole.ADMIN,
-            phone='',
-        )
-        building = Building.objects.create(
-            name=building_name,
-            address='Dhaka, Bangladesh',
-            developer=business_user,
-            primary_contact=business_user,
-            total_units=0,
-        )
-        BuildingSetting.objects.create(
-            building=building,
-            key_name='enabled_modules',
-            value_json={'modules': modules},
-        )
-        token, _ = Token.objects.get_or_create(user=django_user)
+        try:
+            validate_password(password)
+        except DjangoValidationError as exc:
+            return Response({'detail': ' '.join(exc.messages)}, status=400)
+
+        with transaction.atomic():
+            django_user = DjangoUser.objects.create_user(username=email, email=email, password=password, first_name=name)
+            business_user = User.objects.create(
+                name=name,
+                email=email,
+                password_hash=make_password(password),
+                role=UserRole.ADMIN,
+                phone='',
+            )
+            building = Building.objects.create(
+                name=building_name,
+                address='Dhaka, Bangladesh',
+                developer=business_user,
+                primary_contact=business_user,
+                total_units=0,
+            )
+            BuildingSetting.objects.create(
+                building=building,
+                key_name='enabled_modules',
+                value_json={'modules': modules},
+            )
+            token, _ = Token.objects.get_or_create(user=django_user)
         return Response({
             'token': token.key,
             'user': serialize_business_user(business_user),
@@ -609,19 +597,41 @@ class DashboardSummaryAPIView(APIView):
 
     def get(self, request):
         business_user = business_user_from_request(request)
+        # Tenant scoping: back-office users see everything, everyone else only
+        # the buildings they belong to. A requested building_id outside that
+        # set falls back to the caller's own building instead of leaking data.
+        if is_backoffice(request):
+            visible_buildings = Building.objects.all().order_by('name')
+        else:
+            visible_buildings = buildings_for_user(business_user).order_by('name')
+
         building_id = request.query_params.get('building_id')
-        building = Building.objects.filter(pk=building_id).first() if building_id else first_building_for_user(business_user)
+        building = visible_buildings.filter(pk=building_id).first() if building_id else None
+        if not building:
+            building = first_building_for_user(business_user) if is_backoffice(request) else visible_buildings.first()
 
         if not building:
             return Response({
                 'building': None,
                 'buildings': [],
+                'me': serialize_business_user(business_user),
+                'current_resident_id': None,
                 'metrics': {},
                 'sections': {},
             })
 
-        invoices = Invoice.objects.filter(building=building).select_related('resident__user', 'resident__unit', 'bill_type').order_by('-created_at')
-        tickets = Ticket.objects.filter(building=building).select_related('resident__user', 'assigned_to').order_by('-created_at')
+        invoices = (
+            Invoice.objects.filter(building=building)
+            .select_related('resident__user', 'resident__unit', 'bill_type')
+            .prefetch_related('items')
+            .order_by('-created_at')
+        )
+        tickets = (
+            Ticket.objects.filter(building=building)
+            .select_related('resident__user', 'assigned_to')
+            .prefetch_related('images')
+            .order_by('-created_at')
+        )
         residents = Resident.objects.filter(building=building).select_related('user', 'unit').order_by('unit__unit_number')
         units = Unit.objects.filter(building=building).order_by('floor', 'unit_number')
         payments_total = Payment.objects.filter(invoice__building=building).aggregate(total=Sum('amount'))['total'] or 0
@@ -636,15 +646,18 @@ class DashboardSummaryAPIView(APIView):
         )
 
         latest_lift_logs = []
-        for log in LiftStatusLog.objects.filter(building=building).select_related('asset').order_by('asset_id', '-timestamp'):
-            if not any(item['asset_id'] == log.asset_id for item in latest_lift_logs):
-                latest_lift_logs.append({
-                    'id': log.id,
-                    'asset_id': log.asset_id,
-                    'name': log.asset.name if log.asset else 'Building lift',
-                    'status': log.status,
-                    'timestamp': log.timestamp,
-                })
+        seen_lift_assets = set()
+        for log in LiftStatusLog.objects.filter(building=building).select_related('asset').order_by('asset_id', '-timestamp')[:500]:
+            if log.asset_id in seen_lift_assets:
+                continue
+            seen_lift_assets.add(log.asset_id)
+            latest_lift_logs.append({
+                'id': log.id,
+                'asset_id': log.asset_id,
+                'name': log.asset.name if log.asset else 'Building lift',
+                'status': log.status,
+                'timestamp': log.timestamp,
+            })
 
         parking_layout = BuildingSetting.objects.filter(building=building, key_name='parking_layout').first()
         chat_rooms = ChatRoom.objects.filter(building=building).annotate(last_message_at=Max('messages__sent_at')).order_by('-last_message_at', 'name')
@@ -689,8 +702,13 @@ class DashboardSummaryAPIView(APIView):
             .order_by('-start_time')[:8]
         ]
         poll_cards = []
-        for poll in Poll.objects.filter(building=building).order_by('-start_date')[:5]:
-            options = Option.objects.filter(poll=poll).annotate(votes=Count('vote')).order_by('id')
+        polls_qs = (
+            Poll.objects.filter(building=building)
+            .prefetch_related(Prefetch('options', queryset=Option.objects.annotate(votes=Count('vote')).order_by('id')))
+            .order_by('-start_date')[:5]
+        )
+        for poll in polls_qs:
+            options = poll.options.all()
             total_votes = sum(option.votes for option in options)
             poll_cards.append({
                 **PollSerializer(poll).data,
@@ -707,7 +725,7 @@ class DashboardSummaryAPIView(APIView):
 
         data = {
             'building': BuildingSerializer(building).data,
-            'buildings': BuildingSerializer(Building.objects.all().order_by('name'), many=True).data,
+            'buildings': BuildingSerializer(visible_buildings, many=True).data,
             'me': serialize_business_user(business_user),
             'current_resident_id': Resident.objects.filter(user=business_user, building=building).values_list('id', flat=True).first(),
             'metrics': {
@@ -740,7 +758,10 @@ class DashboardSummaryAPIView(APIView):
                 'directory': resident_cards,
                 'intercom_logs': IntercomLogSerializer(IntercomLog.objects.filter(device__building=building).select_related('device').order_by('-timestamp')[:8], many=True).data,
                 'chat_rooms': ChatRoomSerializer(chat_rooms, many=True).data,
-                'messages': MessageSerializer(Message.objects.filter(room=first_room).order_by('sent_at')[:30], many=True).data if first_room else [],
+                # Latest 30 messages, returned oldest-first for the chat feed.
+                'messages': MessageSerializer(
+                    list(Message.objects.filter(room=first_room).order_by('-sent_at')[:30])[::-1], many=True
+                ).data if first_room else [],
                 'listings': ListingSerializer(Listing.objects.filter(building=building).order_by('-created_at')[:8], many=True).data,
                 'gate_logs': GateEventSerializer(GateEvent.objects.filter(building=building).order_by('-timestamp')[:10], many=True).data,
                 'lifts': latest_lift_logs,
@@ -762,43 +783,59 @@ class DashboardSummaryAPIView(APIView):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().order_by('-created_at')
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-
-class BuildingViewSet(viewsets.ModelViewSet):
-    queryset = Building.objects.all().order_by('-created_at')
-    serializer_class = BuildingSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-
-class UnitViewSet(viewsets.ModelViewSet):
-    queryset = Unit.objects.all().select_related('building').order_by('building_id', 'unit_number')
-    serializer_class = UnitSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdminStrict]
 
     def get_queryset(self):
         qs = super().get_queryset()
-        building_id = self.request.query_params.get('building_id')
+        allowed = allowed_building_ids(self.request)
+        if allowed is None:
+            return qs
+        return qs.filter(
+            Q(resident__building_id__in=allowed)
+            | Q(staff__building_id__in=allowed)
+            | Q(developed_buildings__id__in=allowed)
+            | Q(primary_contact_buildings__id__in=allowed)
+        ).distinct()
+
+
+class BuildingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
+    queryset = Building.objects.all().order_by('-created_at')
+    serializer_class = BuildingSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = None
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        allowed = allowed_building_ids(self.request)
+        if allowed is None:
+            return qs
+        return qs.filter(pk__in=allowed)
+
+
+class UnitViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
+    queryset = Unit.objects.all().select_related('building').order_by('building_id', 'unit_number')
+    serializer_class = UnitSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
+
+    def get_queryset(self):
+        qs = super().get_queryset()
         status_q = self.request.query_params.get('status')
-        if building_id:
-            qs = qs.filter(building_id=building_id)
         if status_q:
             qs = qs.filter(status=status_q)
         return qs
 
 
-class ResidentViewSet(viewsets.ModelViewSet):
+class ResidentViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Resident.objects.all().select_related('user', 'building', 'unit').order_by('-created_at')
     serializer_class = ResidentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     @action(detail=False, methods=['get'])
     def directory(self, request):
         qs = self.get_queryset().filter(user__is_listed=True)
-        building_id = request.query_params.get('building_id')
         search = request.query_params.get('search')
-        if building_id:
-            qs = qs.filter(building_id=building_id)
         if search:
             qs = qs.filter(
                 Q(user__name__icontains=search)
@@ -822,16 +859,26 @@ class ResidentViewSet(viewsets.ModelViewSet):
 
 
 # Services & Vendors
-class ServiceViewSet(viewsets.ModelViewSet):
+class ServiceViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Service.objects.all()
     serializer_class = ServiceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = None
 
 
-class VendorViewSet(viewsets.ModelViewSet):
+class VendorViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Vendor.objects.all().select_related('service', 'building')
     serializer_class = VendorSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = None
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        allowed = allowed_building_ids(self.request)
+        if allowed is None:
+            return qs
+        # Global vendors (no building) stay visible alongside the caller's own.
+        return qs.filter(Q(building_id__in=allowed) | Q(building__isnull=True))
 
     @action(detail=False, methods=['get'])
     def nearby(self, request):
@@ -863,10 +910,11 @@ class VendorViewSet(viewsets.ModelViewSet):
         return Response({'count': len(data), 'results': data})
 
 
-class ReviewViewSet(viewsets.ModelViewSet):
+class ReviewViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Review.objects.all().select_related('vendor', 'resident')
     serializer_class = ReviewSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'resident__building'
 
 
 # Finance
@@ -876,20 +924,18 @@ class BillTypeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
 
 
-class InvoiceViewSet(viewsets.ModelViewSet):
+class InvoiceViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Invoice.objects.all().select_related('resident', 'building', 'bill_type')
     serializer_class = InvoiceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     def get_queryset(self):
         qs = super().get_queryset()
-        building_id = self.request.query_params.get('building_id')
         resident_id = self.request.query_params.get('resident_id')
         status_q = self.request.query_params.get('status')
         due_before = self.request.query_params.get('due_before')
         due_after = self.request.query_params.get('due_after')
-        if building_id:
-            qs = qs.filter(building_id=building_id)
         if resident_id:
             qs = qs.filter(resident_id=resident_id)
         if status_q:
@@ -911,33 +957,42 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if not all([building_id, bill_type_id, billing_month, due_date]):
             return Response({'detail': 'building_id, bill_type_id, billing_month, due_date required'}, status=400)
 
-        residents = Resident.objects.filter(building_id=building_id)
+        try:
+            building_pk = int(building_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'building_id must be an integer'}, status=400)
+        allowed = allowed_building_ids(request)
+        if allowed is not None and building_pk not in allowed:
+            return Response({'detail': 'Building not accessible.'}, status=403)
+
+        residents = Resident.objects.filter(building_id=building_pk)
         created = []
-        for r in residents:
-            inv = Invoice.objects.create(
-                invoice_number=f"AUTO-{r.id}-{billing_month.replace('-', '')}",
-                resident=r,
-                building_id=building_id,
-                bill_type_id=bill_type_id,
-                amount=0,
-                due_date=due_date,
-                status='pending'
-            )
-            # Example fixed line; replace with your business rules:
-            InvoiceItem.objects.create(invoice=inv, description='Monthly Service Charge', quantity=1, unit_price=2000, tax_amount=0, total_amount=2000)
-            total = inv.items.aggregate(s=Sum('total_amount'))['s'] or 0
-            # Optionally include utilities:
-            if include_utilities:
-                # Attach latest unpaid utility bills for this resident's unit
-                if r.unit_id:
-                    meters = UtilityMeter.objects.filter(unit_id=r.unit_id)
-                    bills = UtilityBill.objects.filter(meter__in=meters, status='pending')
-                    for b in bills:
-                        InvoiceItem.objects.create(invoice=inv, description=f'Utility {b.meter.type} {b.reading_date}', quantity=1, unit_price=b.amount, tax_amount=0, total_amount=b.amount, utility_bill_id=b.id)
-                    total = inv.items.aggregate(s=Sum('total_amount'))['s'] or total
-            inv.amount = total
-            inv.save()
-            created.append(inv.id)
+        with transaction.atomic():
+            for r in residents:
+                inv, was_created = Invoice.objects.get_or_create(
+                    invoice_number=f"AUTO-{r.id}-{billing_month.replace('-', '')}",
+                    defaults={
+                        'resident': r,
+                        'building_id': building_id,
+                        'bill_type_id': bill_type_id,
+                        'amount': 0,
+                        'due_date': due_date,
+                        'status': 'pending',
+                    },
+                )
+                if not was_created:
+                    continue  # already generated for this month — keep the run idempotent
+                items = [InvoiceItem(invoice=inv, description='Monthly Service Charge', quantity=1, unit_price=2000, tax_amount=0, total_amount=2000)]
+                if include_utilities and r.unit_id:
+                    bills = UtilityBill.objects.filter(meter__unit_id=r.unit_id, status='pending').select_related('meter')
+                    items += [
+                        InvoiceItem(invoice=inv, description=f'Utility {b.meter.type} {b.reading_date}', quantity=1, unit_price=b.amount, tax_amount=0, total_amount=b.amount, utility_bill_id=b.id)
+                        for b in bills
+                    ]
+                InvoiceItem.objects.bulk_create(items)
+                inv.amount = sum(item.total_amount for item in items)
+                inv.save(update_fields=['amount', 'updated_at'])
+                created.append(inv.id)
         return Response({'created_invoices': created}, status=201)
 
     @action(detail=True, methods=['post'])
@@ -947,26 +1002,34 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response({'detail': f'Reminder queued for invoice {inv.invoice_number}'})
 
 
-class PaymentViewSet(viewsets.ModelViewSet):
+class PaymentViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Payment.objects.all().select_related('invoice', 'resident')
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'invoice__building'
 
     @action(detail=False, methods=['post'])
     def checkout(self, request):
         invoice_id = request.data.get('invoice_id')
         method = request.data.get('method', 'card')
-        invoice = get_object_or_404(Invoice, pk=invoice_id)
+        invoices = Invoice.objects.all()
+        allowed = allowed_building_ids(request)
+        if allowed is not None:
+            invoices = invoices.filter(building_id__in=allowed)
         transaction_id = request.data.get('transaction_id') or f"demo_{uuid4().hex[:12]}"
-        payment = Payment.objects.create(
-            invoice=invoice,
-            resident=invoice.resident,
-            amount=invoice.amount,
-            method=method,
-            transaction_id=transaction_id,
-        )
-        invoice.status = 'paid'
-        invoice.save(update_fields=['status', 'updated_at'])
+        with transaction.atomic():
+            invoice = get_object_or_404(invoices.select_for_update(), pk=invoice_id)
+            if invoice.status == 'paid':
+                return Response({'detail': 'Invoice is already paid.'}, status=400)
+            payment = Payment.objects.create(
+                invoice=invoice,
+                resident=invoice.resident,
+                amount=invoice.amount,
+                method=method,
+                transaction_id=transaction_id,
+            )
+            invoice.status = 'paid'
+            invoice.save(update_fields=['status', 'updated_at'])
         return Response({
             'checkout_status': 'paid',
             'transaction_id': transaction_id,
@@ -974,10 +1037,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
         }, status=201)
 
 
-class ExpenseViewSet(viewsets.ModelViewSet):
+class ExpenseViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Expense.objects.all().select_related('building', 'vendor', 'created_by')
     serializer_class = ExpenseSerializer
     permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     @action(detail=False, methods=['get'])
     def monthly_report(self, request):
@@ -1006,19 +1070,17 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
 
 # Notices
-class NoticeViewSet(viewsets.ModelViewSet):
+class NoticeViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Notice.objects.all().select_related('building', 'created_by')
     serializer_class = NoticeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     def get_queryset(self):
         qs = super().get_queryset()
-        building_id = self.request.query_params.get('building_id')
         include_archived = self.request.query_params.get('include_archived') == 'true'
         search = self.request.query_params.get('search')
         current = now()
-        if building_id:
-            qs = qs.filter(building_id=building_id)
         if not include_archived:
             qs = qs.filter(publish_date__lte=current).filter(Q(expiry_date__isnull=True) | Q(expiry_date__gte=current))
         if search:
@@ -1027,22 +1089,35 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
 
 # Staff & Attendance
-class StaffViewSet(viewsets.ModelViewSet):
+class StaffViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Staff.objects.all().select_related('user', 'building')
     serializer_class = StaffSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
 
-class AttendanceViewSet(viewsets.ModelViewSet):
+class AttendanceViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Attendance.objects.all().select_related('staff')
     serializer_class = AttendanceSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'staff__building'
+
+    def _scoped_staff(self, request):
+        qs = Staff.objects.all()
+        allowed = allowed_building_ids(request)
+        if allowed is not None:
+            qs = qs.filter(building_id__in=allowed)
+        return qs
 
     @action(detail=False, methods=['post'])
     def checkin(self, request):
         staff_id = request.data.get('staff_id')
         ts = request.data.get('timestamp')
-        staff = get_object_or_404(Staff, pk=staff_id)
+        staff = get_object_or_404(self._scoped_staff(request), pk=staff_id)
+        # Idempotent: a second check-in returns the already-open shift.
+        open_rec = Attendance.objects.filter(staff=staff, checkout_time__isnull=True).order_by('-checkin_time').first()
+        if open_rec:
+            return Response(AttendanceSerializer(open_rec).data)
         rec = Attendance.objects.create(staff=staff, checkin_time=ts or now())
         return Response(AttendanceSerializer(rec).data, status=201)
 
@@ -1050,19 +1125,21 @@ class AttendanceViewSet(viewsets.ModelViewSet):
     def checkout(self, request):
         staff_id = request.data.get('staff_id')
         ts = request.data.get('timestamp')
-        att = Attendance.objects.filter(staff_id=staff_id, checkout_time__isnull=True).order_by('-checkin_time').first()
+        staff = get_object_or_404(self._scoped_staff(request), pk=staff_id)
+        att = Attendance.objects.filter(staff=staff, checkout_time__isnull=True).order_by('-checkin_time').first()
         if not att:
             return Response({'detail': 'No open attendance record'}, status=400)
         att.checkout_time = ts or now()
-        att.save()
+        att.save(update_fields=['checkout_time'])
         return Response(AttendanceSerializer(att).data)
 
 
 # Visitor Management
-class AppointmentViewSet(viewsets.ModelViewSet):
+class AppointmentViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Appointment.objects.all().select_related('building', 'resident')
     serializer_class = AppointmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
     def perform_create(self, serializer):
         token = serializer.validated_data.get('qr_token') or uuid4().hex
@@ -1074,10 +1151,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         return Response({'appointment_id': appt.id, 'qr_token': appt.qr_token})
 
 
-class VisitorViewSet(viewsets.ModelViewSet):
+class VisitorViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Visitor.objects.all().select_related('appointment', 'handled_by')
     serializer_class = VisitorSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'appointment__building'
 
     @action(detail=False, methods=['post'])
     def scan(self, request):
@@ -1086,7 +1164,11 @@ class VisitorViewSet(viewsets.ModelViewSet):
         if not token:
             return Response({'detail': 'qr_token is required'}, status=400)
 
-        appointment = get_object_or_404(Appointment, qr_token=token)
+        appointments = Appointment.objects.all()
+        allowed = allowed_building_ids(request)
+        if allowed is not None:
+            appointments = appointments.filter(building_id__in=allowed)
+        appointment = get_object_or_404(appointments, qr_token=token)
         if appointment.scheduled_time.date() < now().date():
             return Response({'detail': 'Appointment has expired'}, status=400)
 
@@ -1130,10 +1212,11 @@ class VisitorViewSet(viewsets.ModelViewSet):
 
 
 # Tickets
-class TicketViewSet(viewsets.ModelViewSet):
+class TicketViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Ticket.objects.all().select_related('building', 'resident', 'assigned_to', 'service_vendor')
     serializer_class = TicketSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
     def perform_create(self, serializer):
         category = serializer.validated_data.get('category', '')
@@ -1171,17 +1254,19 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response(TicketImageSerializer(img).data, status=201)
 
 
-class TicketImageViewSet(viewsets.ModelViewSet):
+class TicketImageViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = TicketImage.objects.all().select_related('ticket')
     serializer_class = TicketImageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'ticket__building'
 
 
 # Resources & Bookings
-class ResourceViewSet(viewsets.ModelViewSet):
+class ResourceViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Resource.objects.all().select_related('building')
     serializer_class = ResourceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     @action(detail=True, methods=['get'])
     def availability(self, request, pk=None):
@@ -1197,10 +1282,28 @@ class ResourceViewSet(viewsets.ModelViewSet):
         return Response({'resource_id': resource.id, 'bookings': data})
 
 
-class BookingViewSet(viewsets.ModelViewSet):
+class BookingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Booking.objects.all().select_related('resource', 'resident')
     serializer_class = BookingSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'resource__building'
+
+    def perform_create(self, serializer):
+        # Re-check the overlap inside a transaction with locked rows so two
+        # concurrent requests can't both pass the serializer's conflict check.
+        with transaction.atomic():
+            resource = serializer.validated_data.get('resource')
+            start_time = serializer.validated_data.get('start_time')
+            end_time = serializer.validated_data.get('end_time')
+            conflict = Booking.objects.select_for_update().filter(
+                resource=resource,
+                status__in=['pending', 'confirmed'],
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+            ).exists()
+            if conflict:
+                raise serializers.ValidationError('This resource already has a booking in that time window.')
+            serializer.save()
 
     @action(detail=False, methods=['post'])
     def quote(self, request):
@@ -1219,10 +1322,18 @@ class BookingViewSet(viewsets.ModelViewSet):
 
 
 # Polls
-class PollViewSet(viewsets.ModelViewSet):
+class PollViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Poll.objects.all().select_related('building', 'created_by')
     serializer_class = PollSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
+
+    def get_permissions(self):
+        # Voting is open to every authenticated resident; the URLs are mapped
+        # without a router, so action-level permission_classes would be ignored.
+        if self.action == 'vote':
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
 
     @action(detail=True, methods=['post'])
     def vote(self, request, pk=None):
@@ -1231,11 +1342,21 @@ class PollViewSet(viewsets.ModelViewSet):
         resident_id = request.data.get('resident_id')
         if not option_id or not resident_id:
             return Response({'detail': 'option_id and resident_id required'}, status=400)
-        # Enforce one vote per poll per resident
-        if Vote.objects.filter(poll=poll, resident_id=resident_id).exists():
-            return Response({'detail': 'Already voted'}, status=400)
+        if poll.end_date and poll.end_date < now():
+            return Response({'detail': 'Poll has closed'}, status=400)
+        # Non-admin callers can only cast their own vote.
+        if not is_backoffice(request):
+            own = Resident.objects.filter(user=business_user_from_request(request), building=poll.building).first()
+            if own:
+                resident_id = own.id
         opt = get_object_or_404(Option, pk=option_id, poll=poll)
-        vote = Vote.objects.create(poll=poll, option=opt, resident_id=resident_id)
+        try:
+            # The ux_one_vote constraint is the source of truth; racing
+            # duplicates surface as IntegrityError instead of a 500.
+            with transaction.atomic():
+                vote = Vote.objects.create(poll=poll, option=opt, resident_id=resident_id)
+        except IntegrityError:
+            return Response({'detail': 'Already voted'}, status=400)
         return Response(VoteSerializer(vote).data, status=201)
 
     @action(detail=True, methods=['get'])
@@ -1254,23 +1375,26 @@ class PollViewSet(viewsets.ModelViewSet):
         return Response({'poll_id': poll.id, 'total_votes': total, 'results': results})
 
 
-class OptionViewSet(viewsets.ModelViewSet):
+class OptionViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Option.objects.all().select_related('poll')
     serializer_class = OptionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'poll__building'
 
 
-class VoteViewSet(viewsets.ModelViewSet):
+class VoteViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Vote.objects.all().select_related('poll', 'option', 'resident')
     serializer_class = VoteSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'poll__building'
 
 
 # Documents
-class DocumentViewSet(viewsets.ModelViewSet):
+class DocumentViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Document.objects.all().select_related('building', 'uploaded_by', 'parent')
     serializer_class = DocumentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def create(self, request, *args, **kwargs):
@@ -1306,29 +1430,33 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return Response(DocumentAuditLogSerializer(logs, many=True).data)
 
 
-class DocumentACLUserViewSet(viewsets.ModelViewSet):
+class DocumentACLUserViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = DocumentACLUser.objects.all().select_related('document', 'user')
     serializer_class = DocumentACLUserSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'document__building'
 
 
-class DocumentACLRoleViewSet(viewsets.ModelViewSet):
+class DocumentACLRoleViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = DocumentACLRole.objects.all().select_related('document')
     serializer_class = DocumentACLRoleSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'document__building'
 
 
-class DocumentAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+class DocumentAuditLogViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
     queryset = DocumentAuditLog.objects.all().select_related('document', 'user')
     serializer_class = DocumentAuditLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'document__building'
 
 
 # SOS
-class EmergencyViewSet(viewsets.ModelViewSet):
+class EmergencyViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Emergency.objects.all().select_related('building', 'resident')
     serializer_class = EmergencySerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
@@ -1344,16 +1472,18 @@ class EmergencyViewSet(viewsets.ModelViewSet):
 
 
 # Intercom
-class IntercomDeviceViewSet(viewsets.ModelViewSet):
+class IntercomDeviceViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = IntercomDevice.objects.all().select_related('building')
     serializer_class = IntercomDeviceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
 
-class IntercomLogViewSet(viewsets.ModelViewSet):
+class IntercomLogViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = IntercomLog.objects.all().select_related('device')
     serializer_class = IntercomLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'device__building'
 
 
 class IntercomWebhookView(APIView):
@@ -1370,22 +1500,25 @@ class IntercomWebhookView(APIView):
 
 
 # Chat
-class ChatRoomViewSet(viewsets.ModelViewSet):
+class ChatRoomViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = ChatRoom.objects.all().select_related('building')
     serializer_class = ChatRoomSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
 
-class RoomMemberViewSet(viewsets.ModelViewSet):
+class RoomMemberViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = RoomMember.objects.all().select_related('room', 'resident')
     serializer_class = RoomMemberSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'room__building'
 
 
-class MessageViewSet(viewsets.ModelViewSet):
+class MessageViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Message.objects.all().select_related('room', 'resident').order_by('-sent_at')
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'room__building'
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1427,36 +1560,41 @@ class MessageViewSet(viewsets.ModelViewSet):
 
 
 # Rental
-class ListingViewSet(viewsets.ModelViewSet):
+class ListingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Listing.objects.all().select_related('resident', 'building', 'unit')
     serializer_class = ListingSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
 
-class RentalRequestViewSet(viewsets.ModelViewSet):
+class RentalRequestViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = RentalRequest.objects.all().select_related('listing', 'tenant')
     serializer_class = RentalRequestSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'listing__building'
 
 
-class ContractViewSet(viewsets.ModelViewSet):
+class ContractViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Contract.objects.all().select_related('request')
     serializer_class = ContractSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'request__listing__building'
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
 
 # Utilities
-class UtilityMeterViewSet(viewsets.ModelViewSet):
+class UtilityMeterViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = UtilityMeter.objects.all().select_related('unit')
     serializer_class = UtilityMeterSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'unit__building'
 
 
-class UtilityBillViewSet(viewsets.ModelViewSet):
+class UtilityBillViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = UtilityBill.objects.all().select_related('meter')
     serializer_class = UtilityBillSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'meter__unit__building'
 
     @action(detail=False, methods=['post'])
     def generate(self, request):
@@ -1477,23 +1615,26 @@ class UtilityBillViewSet(viewsets.ModelViewSet):
 
 
 # Assets
-class AssetViewSet(viewsets.ModelViewSet):
+class AssetViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Asset.objects.all().select_related('building')
     serializer_class = AssetSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
 
-class AssetMaintenanceViewSet(viewsets.ModelViewSet):
+class AssetMaintenanceViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = AssetMaintenance.objects.all().select_related('asset', 'vendor')
     serializer_class = AssetMaintenanceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'asset__building'
 
 
 # Gate & Lift
-class GateEventViewSet(viewsets.ModelViewSet):
+class GateEventViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = GateEvent.objects.all().select_related('building', 'actor')
     serializer_class = GateEventSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
     @action(detail=False, methods=['get'])
     def analytics(self, request):
@@ -1505,10 +1646,11 @@ class GateEventViewSet(viewsets.ModelViewSet):
         return Response({'results': list(rows)})
 
 
-class LiftStatusLogViewSet(viewsets.ModelViewSet):
+class LiftStatusLogViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = LiftStatusLog.objects.all().select_related('building', 'asset')
     serializer_class = LiftStatusLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
     @action(detail=False, methods=['get'])
     def current(self, request):
@@ -1525,10 +1667,11 @@ class LiftStatusLogViewSet(viewsets.ModelViewSet):
 
 
 # Waste & Notifications
-class WasteScheduleViewSet(viewsets.ModelViewSet):
+class WasteScheduleViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = WasteSchedule.objects.all().select_related('building')
     serializer_class = WasteScheduleSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     @action(detail=False, methods=['get'])
     def next(self, request):
@@ -1540,43 +1683,49 @@ class WasteScheduleViewSet(viewsets.ModelViewSet):
         return Response({'next_collection': WasteScheduleSerializer(schedule).data if schedule else None})
 
 
-class NotificationViewSet(viewsets.ModelViewSet):
+class NotificationViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Notification.objects.all().select_related('building', 'resident')
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'building'
 
 
 # Events & Community
-class EventViewSet(viewsets.ModelViewSet):
+class EventViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Event.objects.all().select_related('building', 'created_by')
     serializer_class = EventSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
 
-class EventAttendeeViewSet(viewsets.ModelViewSet):
+class EventAttendeeViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = EventAttendee.objects.all().select_related('event', 'resident')
     serializer_class = EventAttendeeSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'event__building'
 
 
 # Access & Emergency Contacts
-class AccessCardViewSet(viewsets.ModelViewSet):
+class AccessCardViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = AccessCard.objects.all().select_related('resident')
     serializer_class = AccessCardSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'resident__building'
 
 
-class EmergencyContactViewSet(viewsets.ModelViewSet):
+class EmergencyContactViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = EmergencyContact.objects.all().select_related('building')
     serializer_class = EmergencyContactSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
 
 # Parking
-class ParkingSlotViewSet(viewsets.ModelViewSet):
+class ParkingSlotViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = ParkingSlot.objects.all().select_related('building')
     serializer_class = ParkingSlotSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
     @action(detail=False, methods=['post'])
     def layout(self, request):
@@ -1610,29 +1759,30 @@ class ParkingSlotViewSet(viewsets.ModelViewSet):
         }, status=201)
 
 
-class VehicleViewSet(viewsets.ModelViewSet):
+class VehicleViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Vehicle.objects.all().select_related('resident', 'parking_slot')
     serializer_class = VehicleSerializer
     permission_classes = [permissions.IsAuthenticated]
+    tenant_field = 'resident__building'
 
 
 # ML & Analytics
 class MLModelViewSet(viewsets.ModelViewSet):
     queryset = MLModel.objects.all()
     serializer_class = MLModelSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
 
 
 class MLTrainingRunViewSet(viewsets.ModelViewSet):
     queryset = MLTrainingRun.objects.all().select_related('model')
     serializer_class = MLTrainingRunSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
 
 
 class MLCityPriceCacheViewSet(viewsets.ModelViewSet):
     queryset = MLCityPriceCache.objects.all().select_related('model')
     serializer_class = MLCityPriceCacheSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
 
 
 class PriceEstimateAPIView(APIView):
@@ -1657,13 +1807,14 @@ class PriceEstimateAPIView(APIView):
 class ActivityLogViewSet(viewsets.ModelViewSet):
     queryset = ActivityLog.objects.all().select_related('user')
     serializer_class = ActivityLogSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdminStrict]
 
 
-class BuildingSettingViewSet(viewsets.ModelViewSet):
+class BuildingSettingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = BuildingSetting.objects.all().select_related('building')
     serializer_class = BuildingSettingSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCommitteeOrAdmin]
+    tenant_field = 'building'
 
 
 # Admin overview (multi-building)
@@ -1671,19 +1822,21 @@ class AdminOverviewAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        building_ids = request.query_params.getlist('building_ids[]') or request.query_params.getlist('building_ids')
-        qs_filter = {}
-        if building_ids:
-            qs_filter['building_id__in'] = building_ids
+        requested = request.query_params.getlist('building_ids[]') or request.query_params.getlist('building_ids')
+        allowed = allowed_building_ids(request)
+        if allowed is not None:
+            requested = [b for b in requested if str(b) in {str(a) for a in allowed}] or allowed
+        building_ids = requested
+
+        def scoped(field='building_id__in'):
+            return {field: building_ids} if building_ids else {}
 
         data = {
-            'invoices': Invoice.objects.filter(**qs_filter).count(),
-            'payments_sum': float(
-                Payment.objects.filter(invoice__building_id__in=building_ids).aggregate(s=Sum('amount'))['s'] or 0
-            ) if building_ids else float(Payment.objects.aggregate(s=Sum('amount'))['s'] or 0),
-            'open_tickets': Ticket.objects.filter(status='open', **qs_filter).count(),
-            'bookings': Booking.objects.filter(resource__building_id__in=building_ids) .count() if building_ids else Booking.objects.count(),
-            'occupancy': Unit.objects.filter(status='occupied').count(),
+            'invoices': Invoice.objects.filter(**scoped()).count(),
+            'payments_sum': float(Payment.objects.filter(**scoped('invoice__building_id__in')).aggregate(s=Sum('amount'))['s'] or 0),
+            'open_tickets': Ticket.objects.filter(status='open', **scoped()).count(),
+            'bookings': Booking.objects.filter(**scoped('resource__building_id__in')).count(),
+            'occupancy': Unit.objects.filter(status__in=['occupied', 'sold', 'rented'], **scoped()).count(),
         }
         return Response(data)
 
@@ -1712,7 +1865,11 @@ class SettingsAPIView(APIView):
     def get(self, request):
         business_user = business_user_from_request(request)
         building_id = request.query_params.get('building_id')
-        building = Building.objects.filter(pk=building_id).first() if building_id else first_building_for_user(business_user)
+        buildings = Building.objects.all()
+        allowed = allowed_building_ids(request)
+        if allowed is not None:
+            buildings = buildings.filter(pk__in=allowed)
+        building = buildings.filter(pk=building_id).first() if building_id else first_building_for_user(business_user)
         return Response({
             'user': serialize_business_user(business_user),
             'building': BuildingSerializer(building).data if building else None,
@@ -1758,7 +1915,11 @@ class SettingsAPIView(APIView):
 
         elif section == 'building':
             building_id = request.data.get('building_id')
-            building = Building.objects.filter(pk=building_id).first()
+            buildings = Building.objects.all()
+            allowed = allowed_building_ids(request)
+            if allowed is not None:
+                buildings = buildings.filter(pk__in=allowed)
+            building = buildings.filter(pk=building_id).first()
             if not building:
                 return Response({'detail': 'Building not found.'}, status=404)
             # Only admins can edit building info

@@ -21,13 +21,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-jd8)#o6mj2zq#4x2%r(j(o@b(y_&z8p246+&(4%4b4k)t+cgjj'
+SECRET_KEY = os.getenv(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-jd8)#o6mj2zq#4x2%r(j(o@b(y_&z8p246+&(4%4b4k)t+cgjj',  # dev-only fallback
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
 
-ALLOWED_HOSTS = []
-if DEBUG:
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',') if h.strip()]
+if not ALLOWED_HOSTS and DEBUG:
     ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 
@@ -90,21 +93,32 @@ ASGI_APPLICATION = 'fluxora_saas.asgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('MYSQL_DATABASE', 'fluxora'),
-        'USER': os.getenv('MYSQL_USER', 'root'),
-        'PASSWORD': os.getenv('MYSQL_PASSWORD', 'root'),
-        'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
-        'PORT': os.getenv('MYSQL_PORT', '3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1",
-        },
-        'CONN_MAX_AGE': 60,
+# MySQL by default; DJANGO_DB_ENGINE=django.db.backends.sqlite3 lets CI and
+# quick local checks run without a MySQL server.
+_DB_ENGINE = os.getenv('DJANGO_DB_ENGINE', 'django.db.backends.mysql')
+if _DB_ENGINE == 'django.db.backends.sqlite3':
+    DATABASES = {
+        'default': {
+            'ENGINE': _DB_ENGINE,
+            'NAME': BASE_DIR / os.getenv('SQLITE_NAME', 'db.sqlite3'),
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': _DB_ENGINE,
+            'NAME': os.getenv('MYSQL_DATABASE', 'fluxora'),
+            'USER': os.getenv('MYSQL_USER', 'root'),
+            'PASSWORD': os.getenv('MYSQL_PASSWORD', 'root'),
+            'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
+            'PORT': os.getenv('MYSQL_PORT', '3306'),
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1",
+            },
+            'CONN_MAX_AGE': 60,
+        }
+    }
 
 
 # Password validation

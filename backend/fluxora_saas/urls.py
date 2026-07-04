@@ -25,6 +25,12 @@ urlpatterns = [
     path('', include('fluxora.urls')),
 ]
 
+# JSON error responses (API-first service); active when DEBUG is off.
+handler400 = 'fluxora_saas.views.http_400_view'
+handler403 = 'fluxora_saas.views.http_403_view'
+handler404 = 'fluxora_saas.views.http_404_view'
+handler500 = 'fluxora_saas.views.http_500_view'
+
 # Serve media in development
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
