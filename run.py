@@ -38,8 +38,12 @@ def ensure_python_packages():
         return
 
     print("Installing missing Python packages:", ", ".join(missing))
+    requirements = BACKEND_DIR / "requirements.txt"
     try:
-        run([sys.executable, "-m", "pip", "install", *missing])
+        if requirements.exists():
+            run([sys.executable, "-m", "pip", "install", "-r", str(requirements)])
+        else:
+            run([sys.executable, "-m", "pip", "install", *missing])
     except subprocess.CalledProcessError:
         if "mysqlclient" in missing:
             print("mysqlclient failed to install. You may need MySQL client libraries.")

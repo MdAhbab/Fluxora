@@ -88,7 +88,7 @@ backend ops/AI gateway.
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install django djangorestframework mysqlclient celery channels
+pip install -r requirements.txt
 ```
 
 Set MySQL environment variables if your local values differ:
@@ -99,6 +99,15 @@ export MYSQL_USER=root
 export MYSQL_PASSWORD=12345678
 export MYSQL_HOST=127.0.0.1
 export MYSQL_PORT=3306
+```
+
+Optional environment overrides:
+
+```bash
+export DJANGO_SECRET_KEY=...        # required in production
+export DJANGO_DEBUG=false           # defaults to true for local dev
+export DJANGO_ALLOWED_HOSTS=api.example.com
+export DJANGO_DB_ENGINE=django.db.backends.sqlite3  # run checks/CI without MySQL
 ```
 
 Run migrations and seed the Bangladeshi demo workspace:
