@@ -6,7 +6,7 @@ import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 import { useData } from '../../lib/data';
 import { useAiAudit, useAiSettings } from '../../lib/ai';
-import { TENANTS, formatBDT } from '../../lib/mock';
+import { formatBDT } from '../../lib/mock';
 import { Eyebrow, Panel, StatusDot, StatusTag, KPI, MiniBars, Btn, Chips, Drawer } from '../components/shared/ui';
 
 const relTime = (ts: number) => {
@@ -196,6 +196,7 @@ function Health() {
 
 function AIConsole() {
   const ai = useAiSettings();
+  const { tenants } = useData();
   const modeLabel = { self: 'Self-hosted Gemma', byok: 'Bring-your-own keys', managed: 'Fluxora Managed AI' }[ai.mode];
   const liveKeys = ai.keys.filter(k => k.status === 'live').length;
   const enabledAgents = Object.values(ai.agents).filter(Boolean).length;
@@ -210,7 +211,7 @@ function AIConsole() {
         <KPI label="Fallback" value="deterministic" hint="always available" />
       </div>
       <Panel num="04" title="Per-tenant usage">
-        {TENANTS.slice(0, 4).map(t => (
+        {tenants.slice(0, 4).map(t => (
           <div key={t.id} className="grid grid-cols-[1fr_120px_60px] items-center px-6 py-4 border-b border-[var(--line)] last:border-0">
             <span>{t.name}</span>
             <div className="h-2 bg-[var(--bg-sunken)] relative overflow-hidden"><div className="absolute inset-y-0 left-0 bg-[var(--accent)]" style={{ width: `${30 + t.flats / 2}%` }} /></div>

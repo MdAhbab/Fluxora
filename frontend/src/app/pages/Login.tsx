@@ -75,12 +75,6 @@ export function Login() {
                 <Link to="/signup" className="mono text-[0.66rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] hover:text-[var(--accent)] border-b border-transparent hover:border-[var(--accent)] pb-1">Begin a tenancy →</Link>
               </div>
             </form>
-
-            <div className="mt-10 text-[var(--ink-muted)] mono text-[0.66rem] uppercase tracking-[0.18em]">
-              <a href="#" className="hover:text-[var(--ink)]">Reset password</a>
-              <span className="mx-3 text-[var(--line)]">·</span>
-              <a href="#" className="hover:text-[var(--ink)]">Sign in via SSO</a>
-            </div>
           </motion.div>
         </div>
 

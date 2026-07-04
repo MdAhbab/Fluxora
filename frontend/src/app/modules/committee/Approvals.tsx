@@ -66,9 +66,10 @@ export default function CommitteeApprovals() {
     ];
   }, [EXPENSES, BOOKINGS, POLLS, NOTICES]);
 
-  const [rows, setRows] = useState(allRows);
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const rows = allRows.filter(r => !removed.has(r.id));
   const filtered = tab === 'All' ? rows : rows.filter(r => r.kind === tab);
-  const remove = (id: string) => setRows(prev => prev.filter(r => r.id !== id));
+  const remove = (id: string) => setRemoved(prev => new Set(prev).add(id));
 
   return (
     <div className="p-6 lg:p-10 space-y-10">

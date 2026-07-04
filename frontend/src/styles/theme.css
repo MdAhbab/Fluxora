@@ -182,6 +182,12 @@
 @keyframes drawX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .draw-x { transform-origin: left; animation: drawX 1.2s cubic-bezier(.7,0,.2,1) forwards; }
 
+/* Indeterminate loading hairline (Shell top bar) */
+@keyframes shellsweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(320%); }
+}
+
 @keyframes windowLight {
   0%, 100% { fill: var(--bg-sunken); }
   50% { fill: var(--accent); }

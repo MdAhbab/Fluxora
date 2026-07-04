@@ -4,6 +4,7 @@ import { Calendar } from 'lucide-react';
 import { Eyebrow, Panel, Btn, StatusTag } from '../../components/shared/ui';
 import { type Notice, type Poll } from '../../../lib/mock';
 import { useData } from '../../../lib/data';
+import { fmtTime } from '../../../lib/adapt';
 
 const TABS = ['Notices', 'Polls', 'Events', 'Documents', 'Directory', 'Chat'] as const;
 type Tab = typeof TABS[number];
@@ -190,8 +191,9 @@ function Documents() {
 }
 
 function Directory() {
+  const { directory } = useData();
   const [show, setShow] = useState(true);
-  const people = [
+  const localPeople = [
     { n: 'Nusrat Rahman', f: '7C', p: 'Architect' },
     { n: 'Tahmid Rahman', f: '7C', p: 'Investment banker' },
     { n: 'S. Choudhury', f: '12A', p: 'Lawyer' },
@@ -205,6 +207,9 @@ function Directory() {
     { n: 'I. Khan', f: '6C', p: 'Designer' },
     { n: 'P. Sultana', f: '4D', p: 'Editor' },
   ];
+  const people = directory.length
+    ? directory.map((d: any) => ({ n: d.name, f: d.unit_number, p: d.email || d.phone || '' }))
+    : localPeople;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between border border-[var(--line)] px-5 py-3 bg-[var(--bg-raised)]">
@@ -230,21 +235,37 @@ function Directory() {
 }
 
 function Chat() {
-  const { chatRooms, sendMessage } = useData();
+  const { chatRooms, messages, directory, residentId, sendMessage } = useData();
   const [chatText, setChatText] = useState('');
-  const rooms = [
+  const localRooms = [
     { id: 'general', label: 'General', active: true },
     { id: 'parents', label: 'Parents group' },
     { id: 'rooftop', label: 'Rooftop garden' },
     { id: 'lift-b', label: 'Lift B updates' },
   ];
-  const msgs = [
+  const localMsgs = [
     { who: 'S. Karim · 12A', t: '18:42', text: 'Heads up — lift B will be down tomorrow morning.' },
     { who: 'F. Hossain · 9D', t: '18:44', text: 'Thanks for the early notice.' },
     { who: 'You', t: '18:50', text: 'Will the elevator vendor be on-site by 6?', me: true },
     { who: 'S. Karim · 12A', t: '18:51', text: 'Yes, Otis confirmed 05:45.' },
     { who: 'M. Begum · 14B', t: '19:02', text: 'ধন্যবাদ ভাই — আগেই জানিয়ে দিলেন।' },
   ];
+  const rooms = chatRooms.length
+    ? chatRooms.map((r: any, i: number) => ({ id: r.id, label: r.name, active: i === 0 }))
+    : localRooms;
+  const senderById = new Map<number, any>(directory.map((d: any) => [d.id, d]));
+  const msgs = messages.length
+    ? messages.map((m: any) => {
+        const sender = senderById.get(m.resident);
+        const me = m.resident === residentId;
+        return {
+          who: me ? 'You' : sender ? `${sender.name}${sender.unit_number ? ' · ' + sender.unit_number : ''}` : `Resident #${m.resident}`,
+          t: fmtTime(m.sent_at),
+          text: m.content,
+          me,
+        };
+      })
+    : localMsgs;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 border border-[var(--line)] bg-[var(--bg-raised)] min-h-[480px]">
       <aside className="lg:col-span-1 border-b lg:border-b-0 lg:border-r border-[var(--line)]">

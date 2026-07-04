@@ -18,7 +18,7 @@ export default function CommitteeEstate() {
     const avgRent = 68_500;
     const occPct = Math.round(((total - vacant) / total) * 100);
     return { total, vacant, owner, rented, occPct, avgRent };
-  }, []);
+  }, [UNITS]);
 
   const rows = useMemo(() => {
     const f = filter.toLowerCase();
@@ -31,7 +31,7 @@ export default function CommitteeEstate() {
     const map: Record<number, typeof UNITS> = {};
     UNITS.forEach(u => { (map[u.floor] = map[u.floor] || []).push(u); });
     return Object.keys(map).map(Number).sort((a, b) => b - a).map(f => ({ f, units: map[f] }));
-  }, []);
+  }, [UNITS]);
 
   const tintFor = (occ: string) => {
     if (occ === 'owner') return 'var(--positive)';

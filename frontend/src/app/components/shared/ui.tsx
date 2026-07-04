@@ -133,6 +133,9 @@ export function HoldButton({ onConfirm, label = 'Hold to confirm', variant = 'pr
   const [progress, setProgress] = useState(0);
   const raf = useRef<number | null>(null);
   const start = useRef<number>(0);
+  const resetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (resetTimeout.current) clearTimeout(resetTimeout.current); }, []);
 
   const begin = () => {
     start.current = performance.now();
@@ -140,7 +143,7 @@ export function HoldButton({ onConfirm, label = 'Hold to confirm', variant = 'pr
       const p = Math.min(1, (t - start.current) / duration);
       setProgress(p);
       if (p < 1) raf.current = requestAnimationFrame(step);
-      else { onConfirm(); setTimeout(() => setProgress(0), 400); }
+      else { onConfirm(); resetTimeout.current = setTimeout(() => setProgress(0), 400); }
     };
     raf.current = requestAnimationFrame(step);
   };
@@ -155,6 +158,9 @@ export function HoldButton({ onConfirm, label = 'Hold to confirm', variant = 'pr
       onPointerDown={begin}
       onPointerUp={cancel}
       onPointerLeave={cancel}
+      onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); begin(); } }}
+      onKeyUp={e => { if (e.key === 'Enter' || e.key === ' ') cancel(); }}
+      onBlur={cancel}
       className={`group relative inline-flex items-center justify-center h-11 px-6 mono uppercase tracking-[0.18em] text-[0.7rem] overflow-hidden ${variant === 'critical' ? 'bg-[var(--critical)] text-[var(--bg-raised)]' : 'bg-[var(--ink)] text-[var(--bg-raised)]'}`}
     >
       <span className="absolute inset-0 origin-left bg-[var(--accent)]" style={{ transform: `scaleX(${progress})`, transition: progress === 0 ? 'transform .3s' : 'none' }} />
@@ -175,21 +181,6 @@ export function EmptyState({ title, hint, action }: { title: string; hint?: stri
       <div className="display text-[1.4rem] mt-6">{title}</div>
       {hint && <p className="mono text-[0.76rem] uppercase tracking-[0.16em] text-[var(--ink-muted)] mt-3">{hint}</p>}
       {action && <div className="mt-6 inline-block">{action}</div>}
-    </div>
-  );
-}
-
-export function Skeleton({ rows = 6 }: { rows?: number }) {
-  return (
-    <div className="divide-y divide-[var(--line)]">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="grid grid-cols-6 gap-4 py-4 px-6 animate-pulse">
-          <div className="col-span-1 h-3 bg-[var(--bg-sunken)]" />
-          <div className="col-span-3 h-3 bg-[var(--bg-sunken)]" />
-          <div className="col-span-1 h-3 bg-[var(--bg-sunken)]" />
-          <div className="col-span-1 h-3 bg-[var(--bg-sunken)]" />
-        </div>
-      ))}
     </div>
   );
 }

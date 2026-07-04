@@ -27,7 +27,7 @@ export default function AdminEstate() {
           !q || u.flat.toLowerCase().includes(q.toLowerCase()) || (u.resident ?? '').toLowerCase().includes(q.toLowerCase());
         return okF && okQ;
       }),
-    [filter, q],
+    [UNITS, filter, q],
   );
 
   return (

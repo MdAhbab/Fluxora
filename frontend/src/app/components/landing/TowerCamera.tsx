@@ -123,9 +123,6 @@ export function TowerCamera({
         </text>
       </g>
 
-      <line x1={TOWER_W / 2} y1={START_Y - 36} x2={TOWER_W / 2} y2={START_Y - 70} stroke="var(--accent)" strokeWidth="1" />
-      <circle cx={TOWER_W / 2} cy={START_Y - 74} r="3" fill="var(--accent)" />
-
       {/* floors */}
       {Array.from({ length: FLOORS }).map((_, i) => {
         const f = FLOORS - i;

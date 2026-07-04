@@ -99,8 +99,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // server reachable but unexpected — still try demo fallback below
       }
     }
-    // 2) Offline / unseeded fallback: known demo accounts get a local (no-token) session.
-    const acct = DEMO_ACCOUNTS.find(a => a.email.toLowerCase() === email.toLowerCase());
+    // 2) Offline / unseeded fallback: known demo accounts get a local (no-token)
+    //    session — but only with the correct demo password, so a rejected
+    //    backend login can't be bypassed by the fallback.
+    const acct = DEMO_ACCOUNTS.find(a => a.email.toLowerCase() === email.toLowerCase() && a.pass === pass);
     if (acct) {
       authStore.clear();
       setSession({

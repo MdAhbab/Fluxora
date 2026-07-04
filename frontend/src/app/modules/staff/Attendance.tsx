@@ -1,7 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Clock } from 'lucide-react';
 import { Eyebrow, Panel, Btn, Drawer } from '../../components/shared/ui';
+import { useAuth } from '../../../lib/auth';
+import { useData } from '../../../lib/data';
 
 const WEEK = [
   { d: 'Mon', h: 8.2 },
@@ -17,6 +19,9 @@ function HoldCircle({ clockedIn, onConfirm, duration = 1200 }: { clockedIn: bool
   const [progress, setProgress] = useState(0);
   const raf = useRef<number | null>(null);
   const start = useRef(0);
+  const resetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (resetTimeout.current) clearTimeout(resetTimeout.current); }, []);
 
   const begin = () => {
     start.current = performance.now();
@@ -26,7 +31,7 @@ function HoldCircle({ clockedIn, onConfirm, duration = 1200 }: { clockedIn: bool
       if (p < 1) raf.current = requestAnimationFrame(step);
       else {
         onConfirm();
-        setTimeout(() => setProgress(0), 400);
+        resetTimeout.current = setTimeout(() => setProgress(0), 400);
       }
     };
     raf.current = requestAnimationFrame(step);
@@ -113,8 +118,18 @@ function PinPad({ onClose }: { onClose: () => void }) {
 }
 
 export default function Attendance() {
+  const { staff, checkinStaff, checkoutStaff } = useData();
+  const { session } = useAuth();
   const [clockedIn, setClockedIn] = useState(true);
   const [kiosk, setKiosk] = useState(false);
+
+  const me = staff.find(s => s.name === session?.name) ?? staff[0];
+  const myPk = me ? Number(me.id.replace(/^S-/, '')) : 0;
+
+  const handleConfirm = async () => {
+    const ok = clockedIn ? await checkoutStaff(myPk) : await checkinStaff(myPk);
+    if (ok) setClockedIn(v => !v);
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg)] pb-24">
@@ -123,7 +138,7 @@ export default function Attendance() {
 
         {/* Clock in/out */}
         <div className="flex flex-col items-center py-10">
-          <HoldCircle clockedIn={clockedIn} onConfirm={() => setClockedIn(v => !v)} />
+          <HoldCircle clockedIn={clockedIn} onConfirm={handleConfirm} />
           <div className="mono text-[0.66rem] tracking-[0.22em] uppercase text-[var(--ink-muted)] mt-6">
             {clockedIn ? 'You are on duty' : 'Off duty'}
           </div>

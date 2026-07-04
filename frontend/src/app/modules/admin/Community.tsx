@@ -4,6 +4,7 @@ import { Eyebrow, Panel, StatusDot, Btn, Chips, Field } from '../../components/s
 import { useData } from '../../../lib/data';
 import { useAuth } from '../../../lib/auth';
 import { runScribe, type NoticeDraft, type Tone, aiAudit, aiSettings } from '../../../lib/ai';
+import { fmtTime } from '../../../lib/adapt';
 import { Upload, FileText, AlertTriangle } from 'lucide-react';
 
 const DEFAULT_BRIEF = 'Water supply shut-off Tuesday 9am–1pm for tank cleaning';
@@ -49,14 +50,36 @@ const EVENTS = [
 
 export default function AdminCommunity() {
   const data = useData();
-  const { notices: NOTICES, polls: POLLS, addNotice, votePoll } = data;
+  const { notices: NOTICES, polls: POLLS, addNotice, votePoll, directory, chatRooms, messages, sendMessage } = data;
   const { session } = useAuth();
   const [tab, setTab] = useState('Notices');
   const [tone, setTone] = useState<Tone>('Formal');
   const [brief, setBrief] = useState(DEFAULT_BRIEF);
   const [draft, setDraft] = useState<NoticeDraft | null>(() => runScribe(DEFAULT_BRIEF, 'Formal'));
   const [published, setPublished] = useState(false);
-  const [room, setRoom] = useState('general');
+  const [room, setRoom] = useState<string | number | null>(null);
+  const [chatText, setChatText] = useState('');
+
+  const activeRooms = chatRooms.length
+    ? chatRooms.map((r: any) => ({ id: r.id, name: r.name, count: 0, unread: 0 }))
+    : ROOMS;
+  const activeRoomId = room ?? activeRooms[0]?.id;
+  const senderById = new Map<number, any>(directory.map((d: any) => [d.id, d]));
+  const activeMsgs = messages.length
+    ? messages.filter((m: any) => m.room === activeRoomId).map((m: any) => {
+        const sender = senderById.get(m.resident);
+        return { who: sender?.name || `Resident #${m.resident}`, flat: sender?.unit_number || '', when: fmtTime(m.sent_at), body: m.content };
+      })
+    : MESSAGES;
+  const directoryRows = directory.length
+    ? directory.map((d: any) => ({ name: d.name, flat: d.unit_number, opt: d.email || d.phone || '' }))
+    : DIRECTORY;
+
+  const sendChat = async () => {
+    if (!chatText.trim()) return;
+    const ok = await sendMessage(Number(activeRoomId), chatText);
+    if (ok) setChatText('');
+  };
 
   const compose = () => {
     setDraft(runScribe(brief, tone));
@@ -260,9 +283,9 @@ export default function AdminCommunity() {
 
       {tab === 'Directory' && (
         <section className="grid grid-cols-2 md:grid-cols-3 gap-px bg-[var(--line)]">
-          {DIRECTORY.map((d, i) => (
+          {directoryRows.map((d, i) => (
             <motion.div
-              key={d.flat}
+              key={d.flat + i}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: i * 0.05 }}
@@ -288,11 +311,11 @@ export default function AdminCommunity() {
               Rooms
             </div>
             <ul className="divide-y divide-[var(--line)]">
-              {ROOMS.map(r => (
+              {activeRooms.map(r => (
                 <li key={r.id}>
                   <button
                     onClick={() => setRoom(r.id)}
-                    className={`w-full px-5 py-4 flex items-center justify-between text-left ${room === r.id ? 'bg-[var(--bg-sunken)] border-l-2 border-[var(--accent)]' : ''}`}
+                    className={`w-full px-5 py-4 flex items-center justify-between text-left ${activeRoomId === r.id ? 'bg-[var(--bg-sunken)] border-l-2 border-[var(--accent)]' : ''}`}
                   >
                     <div>
                       <div className="text-[0.95rem]">{r.name}</div>
@@ -307,11 +330,11 @@ export default function AdminCommunity() {
 
           <div className="md:col-span-2 bg-[var(--bg-raised)] flex flex-col">
             <header className="px-6 py-4 border-b border-[var(--line)] flex items-center justify-between">
-              <h3 className="mono text-[0.78rem] uppercase tracking-[0.18em]">{ROOMS.find(r => r.id === room)?.name}</h3>
+              <h3 className="mono text-[0.78rem] uppercase tracking-[0.18em]">{activeRooms.find(r => r.id === activeRoomId)?.name}</h3>
               <span className="mono text-[0.66rem] uppercase tracking-[0.16em] text-[var(--ink-muted)]">Today</span>
             </header>
             <ul className="flex-1 p-6 space-y-5 overflow-y-auto">
-              {MESSAGES.map((m, i) => (
+              {activeMsgs.map((m, i) => (
                 <motion.li
                   key={i}
                   initial={{ opacity: 0, y: 6 }}
@@ -336,9 +359,12 @@ export default function AdminCommunity() {
             <div className="border-t border-[var(--line)] p-4 flex gap-3">
               <input
                 placeholder="Write a message…"
+                value={chatText}
+                onChange={e => setChatText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') sendChat(); }}
                 className="flex-1 h-10 px-3 bg-transparent border border-[var(--line)] focus:border-[var(--accent)] outline-none text-[0.92rem]"
               />
-              <Btn variant="primary">Send</Btn>
+              <Btn variant="primary" onClick={sendChat}>Send</Btn>
             </div>
           </div>
         </section>

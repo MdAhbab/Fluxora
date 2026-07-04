@@ -33,7 +33,7 @@ export default function Logs() {
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--positive)]" />
           </span>
           <span className="mono text-[0.7rem] tracking-[0.22em] uppercase text-[var(--ink-muted)]">
-            Streaming · auto-refresh 4s
+            Session log · live
           </span>
         </div>
       </div>

@@ -15,11 +15,15 @@ type StampData = {
 };
 
 export default function Gatehouse() {
-  const { visitors: VISITORS, checkinVisitor, checkoutVisitor, scanVisitor } = useData();
+  const { visitors: VISITORS, checkinVisitor, checkoutVisitor, scanVisitor, createAppointment } = useData();
   const [stamp, setStamp] = useState<StampData | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [expected, setExpected] = useState(() => VISITORS.filter(v => v.status === 'expected'));
   const [checkedIn, setCheckedIn] = useState(() => VISITORS.filter(v => v.status === 'checked-in'));
+  const [manualName, setManualName] = useState('');
+  const [manualPhone, setManualPhone] = useState('');
+  const [manualFlat, setManualFlat] = useState('');
+  const [manualBusy, setManualBusy] = useState(false);
 
   // Re-derive the gate lists whenever live data loads or refreshes.
   useEffect(() => {
@@ -53,6 +57,19 @@ export default function Gatehouse() {
     if (!v) return;
     await checkoutVisitor(v);
     setCheckedIn(checkedIn.filter(x => x.id !== id));
+  };
+
+  const confirmManualEntry = async () => {
+    if (!manualName.trim() || !manualPhone.trim() || manualBusy) return;
+    setManualBusy(true);
+    const ok = await createAppointment({ visitor_name: manualName, visitor_phone: manualPhone, scheduled_time: new Date().toISOString() });
+    setManualBusy(false);
+    if (ok) {
+      setManualOpen(false);
+      setManualName('');
+      setManualPhone('');
+      setManualFlat('');
+    }
   };
 
   return (
@@ -165,11 +182,11 @@ export default function Gatehouse() {
       {/* Manual entry drawer */}
       <Drawer open={manualOpen} onClose={() => setManualOpen(false)} title="Manual entry">
         <div className="space-y-6">
-          <Field label="Visitor name" placeholder="Full name" />
-          <Field label="Flat" placeholder="e.g. 7C" />
-          <Field label="Purpose" placeholder="Delivery / Guest / Vendor" />
+          <Field label="Visitor name" placeholder="Full name" value={manualName} onChange={e => setManualName(e.target.value)} />
+          <Field label="Phone" placeholder="+880 1xxx ..." value={manualPhone} onChange={e => setManualPhone(e.target.value)} />
+          <Field label="Flat" placeholder="e.g. 7C" value={manualFlat} onChange={e => setManualFlat(e.target.value)} />
           <div className="pt-4 flex gap-3">
-            <Btn variant="primary" className="!h-12 flex-1" onClick={() => setManualOpen(false)}>
+            <Btn variant="primary" className="!h-12 flex-1" onClick={confirmManualEntry} disabled={!manualName.trim() || !manualPhone.trim() || manualBusy}>
               Confirm entry
             </Btn>
             <Btn variant="outline" className="!h-12" onClick={() => setManualOpen(false)}>

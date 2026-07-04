@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Eyebrow, Panel, Btn, Field, Drawer, StatusTag, StatusDot } from '../../components/shared/ui';
+import { Eyebrow, Panel, Field, Drawer, StatusTag, StatusDot } from '../../components/shared/ui';
 import { formatBDT, type Listing } from '../../../lib/mock';
 import { useData } from '../../../lib/data';
 
@@ -31,9 +31,30 @@ function FloorplanSVG({ seed = 1 }: { seed?: number }) {
 }
 
 export default function ResidentMarketplace() {
-  const { listings: LISTINGS } = useData();
+  const { listings: LISTINGS, applyToListing } = useData();
   const [tab, setTab] = useState<Tab>('Browse');
   const [open, setOpen] = useState<Listing | null>(null);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [message, setMessage] = useState('');
+  const [sent, setSent] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const openListing = (l: Listing) => {
+    setOpen(l);
+    setName('');
+    setPhone('');
+    setMessage('');
+    setSent(false);
+  };
+
+  const submitApplication = async () => {
+    if (!open || !name.trim() || !phone.trim() || applying) return;
+    setApplying(true);
+    const ok = await applyToListing(open);
+    setApplying(false);
+    if (ok) setSent(true);
+  };
 
   return (
     <div className="p-5 lg:p-10 space-y-8 max-w-[1280px] mx-auto">
@@ -89,7 +110,7 @@ export default function ResidentMarketplace() {
                 </div>
                 <div className="mt-5">
                   <button
-                    onClick={() => setOpen(l)}
+                    onClick={() => openListing(l)}
                     className="mono text-[0.7rem] tracking-[0.2em] uppercase text-[var(--accent)] hover:gap-3 inline-flex items-center gap-2 transition-all"
                   >
                     Apply →
@@ -119,7 +140,6 @@ export default function ResidentMarketplace() {
                   <span className="col-span-2 mono text-[0.66rem] tracking-[0.16em] uppercase text-[var(--ink-muted)]">
                     {l.apps} applicants
                   </span>
-                  <span className="col-span-1 flex justify-end"><Btn variant="outline">Manage</Btn></span>
                 </li>
               ))}
             </ul>
@@ -145,7 +165,6 @@ export default function ResidentMarketplace() {
                     <StatusDot v={a.status === 'pending' ? 'pending' : a.status === 'rejected' ? 'overdue' : 'positive'} />
                     <span className="mono text-[0.66rem] tracking-[0.18em] uppercase text-[var(--ink-muted)]">{a.status}</span>
                   </span>
-                  <span className="col-span-1 flex justify-end"><Btn variant="outline">View</Btn></span>
                 </li>
               ))}
             </ul>
@@ -168,16 +187,26 @@ export default function ResidentMarketplace() {
             </p>
             <div className="space-y-4 pt-2 border-t border-[var(--line)]">
               <div className="eyebrow">Apply</div>
-              <Field label="Full name" placeholder="Your name" />
-              <Field label="Phone" type="tel" placeholder="+880 1xxx ..." />
-              <Field label="Preferred move-in" type="date" />
-              <div>
-                <div className="mono text-[0.66rem] tracking-[0.18em] uppercase text-[var(--ink-muted)] mb-2">Message to owner</div>
-                <textarea rows={3} className="w-full bg-transparent border border-[var(--line)] focus:border-[var(--accent)] outline-none p-3 text-[0.92rem] resize-none transition-colors" placeholder="A short note..." />
-              </div>
-              <button className="w-full h-11 mono uppercase tracking-[0.18em] text-[0.7rem] bg-[var(--accent)] text-[var(--bg-raised)]">
-                Submit application
-              </button>
+              {sent ? (
+                <div className="mono text-[0.78rem] tracking-[0.14em] uppercase text-[var(--accent)] py-4">Application sent to the owner.</div>
+              ) : (
+                <>
+                  <Field label="Full name" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
+                  <Field label="Phone" type="tel" placeholder="+880 1xxx ..." value={phone} onChange={e => setPhone(e.target.value)} />
+                  <Field label="Preferred move-in" type="date" />
+                  <div>
+                    <div className="mono text-[0.66rem] tracking-[0.18em] uppercase text-[var(--ink-muted)] mb-2">Message to owner</div>
+                    <textarea rows={3} value={message} onChange={e => setMessage(e.target.value)} className="w-full bg-transparent border border-[var(--line)] focus:border-[var(--accent)] outline-none p-3 text-[0.92rem] resize-none transition-colors" placeholder="A short note..." />
+                  </div>
+                  <button
+                    onClick={submitApplication}
+                    disabled={!name.trim() || !phone.trim() || applying}
+                    className="w-full h-11 mono uppercase tracking-[0.18em] text-[0.7rem] bg-[var(--accent)] text-[var(--bg-raised)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Submit application
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}

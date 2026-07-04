@@ -222,7 +222,8 @@ export function adaptListings(s: DashboardSummary | null, lk: Lookups): Listing[
       type: 'rent' as Listing['type'],
       posted: fmtRelative(l.created_at),
       status: 'active' as Listing['status'],
-    };
+      _pk: l.id,
+    } as Listing & { _pk: number };
   });
 }
 

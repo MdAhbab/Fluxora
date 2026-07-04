@@ -20,7 +20,7 @@ export function BuildingExplorer({ role, residentFlat, height = 540 }: { role: R
     const out: Record<number, Unit[]> = {};
     UNITS.forEach(u => { (out[u.floor] = out[u.floor] || []).push(u); });
     return out;
-  }, []);
+  }, [UNITS]);
 
   const floorNumbers = Object.keys(floors).map(Number).sort((a, b) => b - a);
 

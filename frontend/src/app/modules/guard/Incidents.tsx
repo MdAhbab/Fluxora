@@ -1,7 +1,7 @@
 import { Eyebrow, Panel, Btn, HoldButton, StatusTag } from '../../components/shared/ui';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, AlertOctagon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Incident = {
   id: string;
@@ -30,6 +30,9 @@ const CONTACTS = [
 export default function Incidents() {
   const [active, setActive] = useState(false);
   const [responded, setResponded] = useState<string | null>(null);
+  const resolveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (resolveTimeout.current) clearTimeout(resolveTimeout.current); }, []);
 
   const trigger = () => {
     setResponded(null);
@@ -38,7 +41,8 @@ export default function Incidents() {
 
   const onRespond = () => {
     setResponded('RESPONDED · 19:42 · K. Sheikh');
-    setTimeout(() => {
+    if (resolveTimeout.current) clearTimeout(resolveTimeout.current);
+    resolveTimeout.current = setTimeout(() => {
       setActive(false);
       setResponded(null);
     }, 1800);

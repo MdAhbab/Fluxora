@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Camera, Plus } from 'lucide-react';
 import { Eyebrow, Panel, Chips, Btn, Field, StatusDot } from '../../components/shared/ui';
@@ -18,6 +18,9 @@ export default function ResidentServices() {
   const [ack, setAck] = useState<string | null>(null);
   const [facility, setFacility] = useState('Rooftop');
   const [bookingTime, setBookingTime] = useState('');
+  const ackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (ackTimeout.current) clearTimeout(ackTimeout.current); }, []);
 
   const myTickets = useMemo(() => {
     const m = TICKETS.filter(t => t.flat === flat);
@@ -28,11 +31,15 @@ export default function ResidentServices() {
 
   const submit = async () => {
     if (!desc.trim()) return;
-    const id = 'T-' + String(Math.floor(100 + Math.random() * 800));
-    await createTicket({ category: cat, description: desc });
-    setAck(id);
-    setDesc('');
-    setTimeout(() => setAck(null), 8000);
+    const ok = await createTicket({ category: cat, description: desc });
+    if (ok) {
+      setAck('Request submitted — track it under My requests.');
+      setDesc('');
+    } else {
+      setAck("Couldn't submit just now — please retry.");
+    }
+    if (ackTimeout.current) clearTimeout(ackTimeout.current);
+    ackTimeout.current = setTimeout(() => setAck(null), 8000);
   };
 
   // calendar grid
@@ -87,10 +94,7 @@ export default function ResidentServices() {
               className="border-2 border-[var(--accent)] bg-[var(--bg-raised)] p-5"
             >
               <div className="mono text-[0.66rem] tracking-[0.2em] uppercase text-[var(--accent)] mb-2">Triage acknowledgment</div>
-              <div className="display text-[1.1rem] leading-snug">
-                Received — routed to <span className="italic text-[var(--accent)]">{cat}</span>, typically resolved in 2 days.
-              </div>
-              <div className="mono text-[0.72rem] tracking-[0.14em] uppercase text-[var(--ink-muted)] mt-3">Ticket · {ack}</div>
+              <div className="display text-[1.1rem] leading-snug">{ack}</div>
             </motion.div>
           )}
         </div>

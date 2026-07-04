@@ -12,7 +12,7 @@ import { runConcierge, enhanceReply, toAgentData, aiSettings, aiAudit, useAiSett
 export function Shell({ children }: { children: ReactNode }) {
   const { session, logout, switchBuilding } = useAuth();
   const { theme, toggle } = useTheme();
-  const { buildings, building: liveBuilding, notifications } = useData();
+  const { buildings, building: liveBuilding, notifications, loading, error, refresh } = useData();
   const nav = useNavigate();
   const { activeModule } = useParams();
   const [bldgOpen, setBldgOpen] = useState(false);
@@ -152,7 +152,26 @@ export function Shell({ children }: { children: ReactNode }) {
               </button>
             </div>
           </div>
+          {/* Indeterminate hairline while the summary refetches */}
+          {loading && (
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden" aria-hidden>
+              <div className="h-full w-1/3 bg-[var(--accent)] animate-[shellsweep_1.2s_ease-in-out_infinite]" />
+            </div>
+          )}
         </header>
+
+        {/* Data-layer error surface: one place instead of per-module handling */}
+        {error && (
+          <div role="alert" className="px-5 lg:px-8 py-2.5 border-b border-[var(--line)] bg-[var(--bg-raised)] flex items-center justify-between gap-4">
+            <span className="mono text-[0.64rem] uppercase tracking-[0.16em] text-[var(--critical)] truncate">{error}</span>
+            <button
+              onClick={() => refresh()}
+              className="mono text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-muted)] hover:text-[var(--accent)] shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* CONTENT */}
         <main className="px-5 lg:px-8 py-8 lg:py-10 pb-32">

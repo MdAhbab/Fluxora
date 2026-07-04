@@ -75,6 +75,7 @@ type DataCtx = {
   votePoll: (poll: any, option: any) => Promise<boolean>;
   sendMessage: (roomId: number, content: string) => Promise<boolean>;
   addBooking: (data: { resource: number; start_time: string; end_time: string; purpose?: string }) => Promise<boolean>;
+  applyToListing: (listing: any) => Promise<boolean>;
   checkinStaff: (staffId: number) => Promise<boolean>;
   checkoutStaff: (staffId: number) => Promise<boolean>;
 };
@@ -251,6 +252,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         guard(() => api.post('/api/bookings/', {
           resource: d.resource, resident: residentId,
           start_time: d.start_time, end_time: d.end_time, purpose: d.purpose || '', status: 'pending',
+        })),
+      applyToListing: (listing) =>
+        guard(() => api.post('/api/rental-requests/', {
+          listing: listing?._pk, tenant: residentId, status: 'pending',
         })),
       checkinStaff: (staffId) =>
         guard(() => api.post('/api/attendance/checkin/', { staff_id: staffId })),
